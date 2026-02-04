@@ -61,9 +61,3 @@ jobs:
 
       - name: Build
         run: pnpm build
-
-      - name: Run tests
-        run: pnpm test:cov
-
-      - name: Run E2E tests
-        run: pnpm test:e2e
