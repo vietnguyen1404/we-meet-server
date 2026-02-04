@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import authConfig from './config/auth.config';
-import { envValidationSchema } from 'src/config/env.validation';
+import { validateEnv } from './config/env.validation';
+import { PrismaModule } from './database/prisma.module';
+import { HealthModule } from './health/health.modules';
 
 @Module({
   imports: [
@@ -9,9 +10,10 @@ import { envValidationSchema } from 'src/config/env.validation';
       isGlobal: true,
       envFilePath: '.env',
       cache: true,
-      load: [authConfig],
-      validationSchema: envValidationSchema,
+      validate: validateEnv,
     }),
+    PrismaModule,
+    HealthModule,
   ],
 })
 export class AppModule {}

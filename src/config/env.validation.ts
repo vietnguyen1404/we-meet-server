@@ -1,12 +1,13 @@
-import * as Joi from 'joi';
+import { z } from 'zod';
 
-export const envValidationSchema = Joi.object({
-  NODE_ENV: Joi.string().valid('development', 'production', 'test').required(),
-  PORT: Joi.number().default(3000),
-
-  JWT_ACCESS_SECRET: Joi.string().required(),
-  JWT_REFRESH_SECRET: Joi.string().required(),
-
-  DATABASE_URL: Joi.string().required(),
-  REDIS_URL: Joi.string().required(),
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  PORT: z.coerce.number().positive().default(3000),
+  DATABASE_URL: z.string().url(),
 });
+
+export type Env = z.infer<typeof envSchema>;
+
+export function validateEnv(config: Record<string, unknown>) {
+  return envSchema.parse(config);
+}
