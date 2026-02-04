@@ -1,0 +1,9 @@
+{
+  "chat.promptFilesLocations": {
+    ".setup/prompts": true
+  },
+  "chat.promptFilesRecommendations": {
+    "setup-greenfield": true,
+    "setup-brownfield": true
+  }
+}

@@ -1,0 +1,88 @@
+workflow:
+  id: brownfield-setup
+  name: Brownfield Setup Workflow for existing projects
+  description: This workflow helps set up essential configurations for existing projects.
+  type: brownfield
+
+  sequence:
+    - step: generate-architecture-doc
+      name: Generate Architecture Documentation
+      description: Create a detailed architecture document for the existing project.
+      prompt: generate-codebase-architecture.prompt.md
+      command: /generate-codebase-architecture
+      outputs:
+        - docs/architecture.md
+
+    - step: generate-folder-structure
+      name: Generate Folder Structure
+      description: Create current folder structure for the existing project.
+      prompt: generate-codebase-folder-structure.prompt.md
+      command: /generate-codebase-folder-structure
+      outputs:
+        - docs/folder-structure.md
+
+    - step: generate-tech-stack
+      name: Generate Tech Stack Documentation
+      description: Document the current tech stack used in the existing project.
+      prompt: generate-codebase-tech-stack.prompt.md
+      command: /generate-codebase-tech-stack
+      outputs:
+        - docs/tech-stack.md
+
+    - step: generate-code-exemplars
+      name: Generate Code Exemplars
+      description: Create code exemplars for key components of the existing project.
+      prompt: generate-codebase-exemplars.prompt.md
+      command: /generate-codebase-exemplars
+      outputs:
+        - docs/code-exemplars.md
+    
+    - step: generate-coding-standards
+      name: Generate Coding Standards and Best Practices
+      description: Create coding standards and best practices documentation for the existing project.
+      prompt: generate-codebase-coding-standards.prompt.md
+      command: /generate-codebase-coding-standards
+      outputs:
+        - docs/coding-standards.md
+
+    - step: add-practical-documents
+      name: Add Practical Documents
+      description: Include practical documents such as security, performance and API documentation, etc.
+      optional: true
+      prompt:
+        examples:
+          - "Comprehensive secure coding instructions for all languages and frameworks, based on OWASP Top 10 and industry best practices."
+          - "The most comprehensive, practical, and engineer-authored performance optimization instructions for all languages, frameworks, and stacks."
+          - "Comprehensive API documentation for all languages and frameworks, including RESTful APIs, GraphQL, gRPC, and WebSocket APIs."
+      outputs:
+        - docs/secure-coding.md
+        - docs/performance.md
+        - docs/api-documentation.md
+
+    - step: generate-copilot-kit
+      name: Generate GitHub Copilot Kit
+      description: Create a comprehensive GitHub Copilot Kit for the existing project.
+      prompt: generate-copilot-kit.prompt.md
+      command: /generate-copilot-kit
+      outputs:
+        - .github/copilot-instructions.md
+        - .github/instructions/*.instructions.md
+        - .github/prompts/*.prompt.md
+
+  decision_guidance:
+    when_to_use:
+    - Set up essential configurations and documentation to enhance development efficiency and maintainability for existing projects.
+    - Generate a comprehensive GitHub Copilot Kit to assist developers in understanding and working with the existing codebase.
+    - Analyze current project structure and tech stack to identify areas for improvement and optimization.
+    when_not_to_use:
+    - For new projects, use the Greenfield Setup Workflow instead.
+    - When the project already has comprehensive documentation and configurations in place.
+
+  references:
+    setup_prompts:
+      - .setup/prompts/generate-codebase-architecture.prompt.md
+      - .setup/prompts/generate-codebase-folder-structure.prompt.md
+      - .setup/prompts/generate-codebase-tech-stack.prompt.md
+      - .setup/prompts/generate-codebase-code-exemplars.prompt.md
+      - .setup/prompts/generate-codebase-coding-standards.prompt.md
+      - .setup/prompts/generate-copilot-kit.prompt.md

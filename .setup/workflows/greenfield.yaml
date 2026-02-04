@@ -1,0 +1,80 @@
+workflow:
+  id: greenfield-setup
+  name: Greenfield Setup Workflow for new projects
+  description: This workflow helps set up essential configurations for new projects.
+  type: greenfield
+
+  sequence:
+    - step: generate-architecture-doc
+      name: Generate Architecture Documentation
+      description: Create a detailed architecture document for the new project.
+      prompt: generate-scaffold-architecture.prompt.md
+      command: /generate-scaffold-architecture
+      outputs:
+        - docs/architecture.md
+
+    - step: generate-tech-stack
+      name: Generate Tech Stack Documentation
+      description: Document the current tech stack used in the new project.
+      prompt: generate-scaffold-tech-stack.prompt.md
+      command: /generate-scaffold-tech-stack
+      outputs:
+        - docs/tech-stack.md
+
+    - step: generate-folder-structure
+      name: Generate Folder Structure
+      description: Create current folder structure for the new project.
+      prompt: generate-scaffold-folder-structure.prompt.md
+      command: /generate-scaffold-folder-structure
+      outputs:
+        - docs/folder-structure.md
+
+    - step: generate-coding-conventions
+      name: Generate Coding Conventions
+      description: Define coding conventions and best practices for the new project.
+      prompt: generate-scaffold-coding-conventions.prompt.md
+      command: /generate-scaffold-coding-conventions
+      outputs:
+        - docs/coding-conventions.md
+
+    - step: add-practical-documents
+      name: Add Practical Documents
+      description: Include practical documents such as security, performance and API documentation, etc.
+      optional: true
+      prompt:
+        examples:
+          - "Comprehensive secure coding instructions for all languages and frameworks, based on OWASP Top 10 and industry best practices."
+          - "The most comprehensive, practical, and engineer-authored performance optimization instructions for all languages, frameworks, and stacks."
+          - "Comprehensive API documentation for all languages and frameworks, including RESTful APIs, GraphQL, gRPC, and WebSocket APIs."
+      outputs:
+        - docs/secure-coding.md
+        - docs/performance.md
+        - docs/api-documentation.md
+
+    - step: generate-copilot-kit
+      name: Generate GitHub Copilot Kit
+      description: Create a comprehensive GitHub Copilot Kit for the new project.
+      prompt: generate-copilot-kit.prompt.md
+      command: /generate-copilot-kit
+      outputs:
+        - .github/copilot-instructions.md
+        - .github/instructions/*.instructions.md
+        - .github/prompts/*.prompt.md
+
+  decision_guidance:
+    when_to_use:
+    - Set up essential configurations and documentation for a new project.
+    - Create detailed architecture and folder structure documentation from scratch.
+    - Document the tech stack and provide code exemplars for key components.
+    - Generate a comprehensive GitHub Copilot Kit to assist developers in understanding and working with the new codebase.
+    when_not_to_use:
+    - For existing projects, use the Brownfield Setup Workflow instead.
+    - When the project already has comprehensive documentation and configurations in place.
+
+  references:
+    setup_prompts:
+      - .setup/prompts/generate-scaffold-architecture.prompt.md
+      - .setup/prompts/generate-scaffold-folder-structure.prompt.md
+      - .setup/prompts/generate-scaffold-tech-stack.prompt.md
+      - .setup/prompts/generate-scaffold-code-conventions.prompt.md
+      - .setup/prompts/generate-copilot-kit.prompt.md
