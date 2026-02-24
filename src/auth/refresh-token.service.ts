@@ -41,7 +41,7 @@ export class RefreshTokenService {
     const token = this.generateToken();
     const tokenHash = await this.hashToken(token);
 
-    const expiresIn = this.configService.get<string>('JWT_REFRESH_EXPIRES_IN', '7d');
+    const expiresIn = this.configService.get<string>('REFRESH_TOKEN_EXPIRES_IN', '7d');
     const expiresAt = this.calculateExpiryDate(expiresIn);
 
     await this.refreshTokenRepository.create({

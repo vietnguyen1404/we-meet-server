@@ -17,8 +17,6 @@ interface ErrorResponse {
   statusCode: number;
   message: string;
   errors?: unknown;
-  timestamp: string;
-  path: string;
 }
 
 @Catch()
@@ -52,8 +50,6 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const errorResponse: ErrorResponse = {
       statusCode: status,
       message,
-      timestamp: new Date().toISOString(),
-      path: request.url,
     };
 
     if (errors !== undefined) {

@@ -18,11 +18,11 @@ import { UsersModule } from '../users/users.module';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
-        const secret = configService.get<string>('JWT_SECRET');
-        const expiresIn = configService.get<string>('JWT_EXPIRES_IN') || '1d';
+        const secret = configService.get<string>('ACCESS_TOKEN_SECRET');
+        const expiresIn = configService.get<string>('ACCESS_TOKEN_EXPIRES_IN') || '15m';
 
         if (!secret) {
-          throw new Error('JWT_SECRET is not defined');
+          throw new Error('ACCESS_TOKEN_SECRET is not defined');
         }
 
         return {
