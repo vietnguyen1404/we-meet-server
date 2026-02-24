@@ -6,8 +6,6 @@ import { RefreshTokenRepository } from './refresh-token.repository';
 
 @Injectable()
 export class RefreshTokenService {
-  private readonly SALT_ROUNDS = 10;
-
   constructor(
     private readonly refreshTokenRepository: RefreshTokenRepository,
     private readonly configService: ConfigService,
@@ -23,8 +21,8 @@ export class RefreshTokenService {
   /**
    * Hash the refresh token using bcrypt
    */
-  async hashToken(token: string): Promise<string> {
-    return bcrypt.hash(token, this.SALT_ROUNDS);
+  hashToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
   }
 
   /**
@@ -39,7 +37,7 @@ export class RefreshTokenService {
    */
   async createRefreshToken(userId: string): Promise<string> {
     const token = this.generateToken();
-    const tokenHash = await this.hashToken(token);
+    const tokenHash = this.hashToken(token);
 
     const expiresIn = this.configService.get<string>('REFRESH_TOKEN_EXPIRES_IN', '7d');
     const expiresAt = this.calculateExpiryDate(expiresIn);
@@ -58,7 +56,7 @@ export class RefreshTokenService {
    */
   async validateRefreshToken(token: string): Promise<{ userId: string; tokenHash: string }> {
     // Hash the token to find it in the database
-    const tokenHash = await this.hashToken(token);
+    const tokenHash = this.hashToken(token);
 
     // Try to find the refresh token by hash
     const refreshToken = await this.refreshTokenRepository.findByTokenHash(tokenHash);
@@ -92,7 +90,7 @@ export class RefreshTokenService {
    */
   async revokeRefreshToken(token: string): Promise<void> {
     try {
-      const tokenHash = await this.hashToken(token);
+      const tokenHash = this.hashToken(token);
       await this.refreshTokenRepository.deleteByTokenHash(tokenHash);
     } catch {
       // Silently fail if token doesn't exist
