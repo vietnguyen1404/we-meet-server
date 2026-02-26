@@ -14,47 +14,32 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  name      String?
-  role      UserRole @default(USER)
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  role         UserRole @default(USER)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  refreshTokens RefreshToken[]
 
-  memberships Membership[]
+  @@map("users")
 }
 
-model Meeting {
+model RefreshToken {
   id        String   @id @default(uuid())
-  title     String
-  hostId    String
-
-  createdAt DateTime @default(now())
-  endedAt   DateTime?
-
-  memberships Membership[]
-}
-
-model Membership {
-  id        String @id @default(uuid())
+  tokenHash String   @unique
   userId    String
-  meetingId String
-  role      MeetingRole
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 
-  user    User    @relation(fields: [userId], references: [id])
-  meeting Meeting @relation(fields: [meetingId], references: [id])
-
-  @@unique([userId, meetingId])
+  @@index([userId])
+  @@map("refresh_tokens")
 }
 
 enum UserRole {
   USER
   ADMIN
-}
-
-enum MeetingRole {
-  HOST
-  PARTICIPANT
 }
