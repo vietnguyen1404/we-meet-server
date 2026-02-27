@@ -20,9 +20,11 @@ model User {
   name         String?
   role         UserRole @default(USER)
 
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
   refreshTokens RefreshToken[]
+  hostedMeetings Meeting[]        @relation("MeetingHost")
+  meetingMembers MeetingMember[]
 
   @@map("users")
 }
@@ -42,4 +44,39 @@ model RefreshToken {
 enum UserRole {
   USER
   ADMIN
+}
+
+enum MeetingRole {
+  HOST
+  PARTICIPANT
+}
+
+model Meeting {
+  id        String   @id @default(uuid())
+  title     String?
+  hostId    String
+  host      User     @relation("MeetingHost", fields: [hostId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  members   MeetingMember[]
+
+  @@index([hostId])
+  @@map("meetings")
+}
+
+model MeetingMember {
+  id        String      @id @default(uuid())
+  meetingId String
+  meeting   Meeting     @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      MeetingRole
+  joinedAt  DateTime    @default(now())
+
+  @@unique([meetingId, userId], name: "unique_meeting_membership")
+  @@index([meetingId])
+  @@index([userId])
+  @@map("meeting_members")
 }
