@@ -54,19 +54,27 @@ Stop asking once the requirement is clear enough to produce a complete issue.
 
 ---
 
-### Step 3 — Determine the next issue number
+### Step 3 — Determine the next WM issue number
 
-Run the following command to find the latest GitHub issue number:
+Find the highest WM issue number from existing issue titles.
+
+Run:
 
 ```bash
-gh issue list --limit 1 --json number --jq '.[0].number // 0'
+gh issue list --limit 200 --json title \
+  --jq '[.[].title | capture("WM-(?<n>[0-9]+)")?.n | tonumber] | max // 0'
 ```
 
-Increment the result by 1. Use this as the issue number prefix:
+Increment the result by 1. Use this value as the prefix:
 
 ```
 WM-<number>: <issue title>
 ```
+
+Rules:
+
+- Only consider titles matching `WM-<number>` — ignore pull request numbers entirely.
+- If no WM issues exist, start from `WM-1`.
 
 ---
 
