@@ -20,22 +20,13 @@ import { UsersModule } from '../users/users.module';
       useFactory: (configService: ConfigService) => {
         const secret = configService.get<string>('ACCESS_TOKEN_SECRET');
         const expiresIn = configService.get<string>('ACCESS_TOKEN_EXPIRES_IN') || '15m';
-
-        if (!secret) {
-          throw new Error('ACCESS_TOKEN_SECRET is not defined');
-        }
-
-        return {
-          secret,
-          signOptions: {
-            expiresIn,
-          } as SignOptions,
-        };
+        if (!secret) throw new Error('ACCESS_TOKEN_SECRET is not defined');
+        return { secret, signOptions: { expiresIn } as SignOptions };
       },
     }),
   ],
   controllers: [AuthController],
   providers: [AuthService, RefreshTokenService, RefreshTokenRepository, JwtStrategy],
-  exports: [AuthService, JwtStrategy, PassportModule],
+  exports: [AuthService, JwtStrategy, PassportModule, JwtModule],
 })
 export class AuthModule {}
