@@ -216,7 +216,7 @@ A developer-ready GitHub checklist. Each task should be small enough to complete
 - [ ] Self-review checklist completed
 - [ ] All acceptance criteria from the issue verified
 - [ ] Unit tests passing
-- [ ] PR created and linked to issue
+- [ ] Implementation ready for pull request
 
 ---
 
@@ -228,4 +228,7 @@ A developer-ready GitHub checklist. Each task should be small enough to complete
 - Omit sections that genuinely do not apply (e.g. no Frontend section for a pure backend feature).
 - Ask at most 2 clarification rounds with at most 4 questions each.
 - Do not generate implementation code — produce a plan only.
+- Do not create or suggest creating a pull request.
+- The output must stop at an implementation plan and task checklist only.
+- No repository mutations (PR creation, commits, pushes) are allowed.
 - The plan must be specific enough that a developer can start implementation immediately without further clarification.
