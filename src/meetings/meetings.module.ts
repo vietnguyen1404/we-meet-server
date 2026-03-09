@@ -8,6 +8,6 @@ import { PrismaModule } from '../database/prisma.module';
   imports: [PrismaModule],
   controllers: [MeetingsController],
   providers: [MeetingsService, MeetingsRepository],
-  exports: [MeetingsService],
+  exports: [MeetingsService, MeetingsRepository],
 })
 export class MeetingsModule {}

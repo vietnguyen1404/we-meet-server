@@ -78,145 +78,116 @@ Use this context to ground every technical decision in Steps 5–9.
 
 ---
 
-### Step 4 — Feature definition
+### Step 4 — Produce the plan
 
-Derive the following directly from the issue content:
+Using the issue content and codebase findings, generate an implementation plan with **exactly** the following sections in this order. Do not add or remove sections.
 
-**Feature Summary**
-A 2–3 sentence plain-language description of what the feature is and what it does.
+---
 
-**Problem Statement**
-Describe the problem or gap this feature addresses. Explain why it matters.
+### 1. Feature Summary
 
-**User Story**
+Explain briefly what the feature does (2–3 sentences).
+
+---
+
+### 2. Problem Statement
+
+Explain the problem the feature solves and why it matters.
+
+---
+
+### 3. Technical Design
+
+Describe the architecture and implementation approach grounded in the existing codebase patterns found in Step 3.
+
+Include:
+
+- **Affected modules** — NestJS modules, files, or packages that must change
+- **Services to modify or create** — service classes and their responsibilities
+- **Database changes** — Prisma model changes, new fields, relations, indexes, migrations
+- **API endpoints** — method, path, request shape, response shape
+- **Validation rules** — DTO validation, guard logic, permission checks
+
+Omit sub-sections that genuinely do not apply to this feature.
+
+---
+
+### 4. Edge Cases
+
+List potential edge cases the implementation must handle gracefully:
+
+- Invalid or unexpected input
+- Missing or null data
+- Permission and role-based access issues
+- Concurrency or race conditions
+- Any additional edge cases derived from the issue or codebase context
+
+---
+
+### 5. Implementation Plan
+
+Provide a high-level, sequenced technical implementation plan a developer can follow from start to finish. Each step should describe **what** to do, not show code.
+
+---
+
+### 6. Implementation Order
+
+List the **exact order** developers should implement the steps. Use a numbered list.
+
+Example:
+
+1. Update Prisma schema
+2. Run and apply migration
+3. Implement service logic
+4. Create DTO
+5. Add controller endpoint
+6. Add guard or permission check
+7. Write tests
+
+---
+
+### 7. Task Breakdown
+
+A GitHub-style checklist where each task is small enough to implement in one focused session.
+
+- [ ] task 1
+- [ ] task 2
+- [ ] task 3
+
+---
+
+### Step 5 — Save the plan
+
+Write the generated plan to the repository so it can be referenced by the `implement-feature` prompt.
+
+1. Determine the **issue identifier** extracted in Step 1.
+   - If the issue title or identifier contains a ticket ID (for example `WM-1`, `WM-2`, etc.), use that ID.
+   - Otherwise fall back to the GitHub issue number.
+
+2. Ensure the `.github/plans` directory exists:
+
+```bash
+mkdir -p .github/plans
+```
+
+3. Generate the filename using the issue identifier:
 
 ```
-As a <user type>, I want <goal> so that <benefit>.
+.github/plans/WM-<issue-id>.md
 ```
 
-_(Reuse the user story from the issue verbatim if present; otherwise derive it.)_
+Examples:
 
----
+```
+.github/plans/WM-1.md
+.github/plans/WM-2.md
+```
 
-### Step 5 — Scope definition
+4. Write the complete plan (all seven sections from Step 4, in order) to that file.
 
-**In Scope**
+Overwrite the file if it already exists.
 
-- What this implementation explicitly covers, based on the issue requirements.
-
-**Out of Scope**
-
-- What is intentionally excluded from this implementation.
-
----
-
-### Step 6 — Functional requirements
-
-List what the system must do. Derive from the issue's requirements and acceptance criteria. Each item must be independently verifiable.
-
-- [ ] The system must …
-- [ ] The system must …
-- [ ] The system must …
-
----
-
-### Step 7 — Technical design
-
-Provide a high-level technical design grounded in the codebase from Step 3. Include only the sections relevant to the feature.
-
-#### Frontend _(if applicable)_
-
-- UI components to create or modify
-- User interactions and state transitions
-- API calls and data binding
-
-#### Backend
-
-- New or modified NestJS modules, controllers, services
-- API endpoints: method, path, request shape, response shape
-- Business logic and validation rules
-- Auth/permission guards required
-
-#### Database _(if applicable)_
-
-- New Prisma models or changes to existing models
-- New fields, relations, indexes, or constraints
-- Required migrations
-
-#### Realtime / External services _(if applicable)_
-
-- WebSocket events, queues, or third-party API integrations
-
----
-
-### Step 8 — Edge cases
-
-List scenarios the implementation must handle gracefully. Derive from the issue notes and acceptance criteria, then add any not covered:
-
-- Permission or role-based access edge cases
-- Empty states and missing data
-- Network failures or timeout scenarios
-- Invalid or unexpected inputs
-- Concurrent operations or race conditions
-
----
-
-### Step 9 — Risks and considerations
-
-Identify potential risks and mitigation strategies:
-
-| Risk   | Impact                | Mitigation            |
-| ------ | --------------------- | --------------------- |
-| <risk> | <high / medium / low> | <mitigation strategy> |
-
-Consider: performance, scalability, security, data integrity, and technical complexity.
-
----
-
-### Step 10 — Implementation plan
-
-A sequenced, step-by-step development plan a developer can follow from start to finish:
-
-1. **Setup** — scaffolding, migrations, or configuration changes
-2. **Data layer** — Prisma schema changes and generated client
-3. **Service layer** — business logic, validation, error handling
-4. **API layer** — controllers, DTOs, guards, endpoints
-5. **Frontend** — components, API integration, UI states _(if applicable)_
-6. **Testing** — unit tests, integration tests, manual test scenarios
-7. **Review & deploy** — PR checklist, smoke testing, monitoring
-
----
-
-### Step 11 — Task breakdown
-
-A developer-ready GitHub checklist. Each task should be small enough to complete in a single focused session.
-
-**Setup**
-
-- [ ] …
-
-**Data layer**
-
-- [ ] …
-
-**Backend**
-
-- [ ] …
-
-**Frontend** _(if applicable)_
-
-- [ ] …
-
-**Testing**
-
-- [ ] …
-
-**Review**
-
-- [ ] Self-review checklist completed
-- [ ] All acceptance criteria from the issue verified
-- [ ] Unit tests passing
-- [ ] Implementation ready for pull request
+5. Confirm the file was written by printing its path.
 
 ---
 
@@ -225,10 +196,10 @@ A developer-ready GitHub checklist. Each task should be small enough to complete
 - The **GitHub issue is the single source of truth** for requirements. Do not invent requirements not stated or implied by the issue.
 - Do not contradict or reinterpret acceptance criteria from the issue.
 - Ground all technical decisions in the existing codebase patterns found in Step 3.
-- Omit sections that genuinely do not apply (e.g. no Frontend section for a pure backend feature).
+- Follow existing architecture patterns in the repository.
 - Ask at most 2 clarification rounds with at most 4 questions each.
-- Do not generate implementation code — produce a plan only.
+- Do not write implementation code — produce a technical plan only.
+- The output must use **exactly** the seven sections defined in Step 4, in order.
 - Do not create or suggest creating a pull request.
-- The output must stop at an implementation plan and task checklist only.
-- No repository mutations (PR creation, commits, pushes) are allowed.
+- The only permitted repository mutation is writing the plan file to `.github/plans/WM-<number>.md`. No other mutations (PR creation, commits, pushes) are allowed.
 - The plan must be specific enough that a developer can start implementation immediately without further clarification.
