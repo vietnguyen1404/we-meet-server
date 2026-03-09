@@ -13,9 +13,13 @@ interface SocketData {
   user?: User;
 }
 
+interface ServerToClientEvents {
+  error: (data: { code: number; message: string }) => void;
+}
+
 type AuthenticatedSocket = Socket<
   Record<string, never>,
-  Record<string, never>,
+  ServerToClientEvents,
   Record<string, never>,
   SocketData
 >;
