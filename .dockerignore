@@ -1,0 +1,38 @@
+# Version control
+.git
+.github
+
+# Dependencies (rebuilt inside Docker)
+node_modules
+
+# Build output (rebuilt inside Docker)
+dist
+
+# Local environment files — never bake secrets into the image
+.env
+.env.*
+!.env.example
+
+# Test artifacts
+coverage
+test
+
+# Editor / OS metadata
+.DS_Store
+.vscode
+*.log
+
+# Docker files themselves (not needed in build context)
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Documentation
+docs
+*.md
+
+# Linter config (not needed at build or runtime)
+eslint.config.*
+
+# Generated prisma types (TypeScript-only, not used at runtime)
+prisma/generated
