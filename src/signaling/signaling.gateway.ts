@@ -15,16 +15,12 @@ import { UsersRepository } from '../users/users.repository';
 import { MeetingsRepository } from '../meetings/meetings.repository';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 
-// ── Presence types ─────────────────────────────────────────────────────────
-
 export interface ParticipantInfo {
   userId: string;
   name: string;
   socketId: string;
   joinedAt: Date;
 }
-
-// ── Socket event payload types ─────────────────────────────────────────────
 
 interface JoinRoomPayload {
   meetingId: string;
@@ -37,8 +33,6 @@ interface LeaveRoomPayload {
 interface GetParticipantsPayload {
   meetingId: string;
 }
-
-// ── Socket.IO typed event maps ─────────────────────────────────────────────
 
 interface ServerToClientEvents {
   error: (data: { code: number; message: string }) => void;
@@ -64,8 +58,6 @@ type AuthenticatedSocket = Socket<
   SocketData
 >;
 
-// ── Gateway ────────────────────────────────────────────────────────────────
-
 @WebSocketGateway({
   cors: {
     origin: 'http://localhost:5173',
@@ -86,8 +78,6 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     private readonly usersRepository: UsersRepository,
     private readonly meetingsRepository: MeetingsRepository,
   ) {}
-
-  // ── Connection lifecycle ───────────────────────────────────────────────
 
   async handleConnection(socket: AuthenticatedSocket): Promise<void> {
     try {
@@ -123,8 +113,6 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     // Clean up presence for every room this socket was in
     this.cleanupSocket(socket);
   }
-
-  // ── Room presence handlers ─────────────────────────────────────────────
 
   @SubscribeMessage('join-room')
   async handleJoinRoom(
@@ -198,8 +186,6 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     socket.emit('participants-list', { meetingId, participants });
   }
 
-  // ── Presence map helpers ───────────────────────────────────────────────
-
   private addToRoom(meetingId: string, socketId: string, user: User): ParticipantInfo {
     if (!this.rooms.has(meetingId)) {
       this.rooms.set(meetingId, new Map());
@@ -225,7 +211,6 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     room.delete(socketId);
 
-    // Clean up empty rooms to prevent memory leaks
     if (room.size === 0) {
       this.rooms.delete(meetingId);
     }
@@ -255,8 +240,6 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     this.server.to(meetingId).emit('participant-left', { meetingId, participant });
   }
-
-  // ── Token extraction ───────────────────────────────────────────────────
 
   private extractToken(socket: AuthenticatedSocket): string | undefined {
     const authToken = socket.handshake.auth?.token as string | undefined;
