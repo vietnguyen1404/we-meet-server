@@ -48,18 +48,22 @@ const fakeUser2 = {
 describe('SignalingGateway', () => {
   let gateway: SignalingGateway;
   let meetingsRepository: { findById: jest.Mock; findMemberByMeetingAndUser: jest.Mock };
+  let jwtService: { verify: jest.Mock };
+  let usersRepository: { findById: jest.Mock };
 
   beforeEach(async () => {
     meetingsRepository = {
       findById: jest.fn(),
       findMemberByMeetingAndUser: jest.fn(),
     };
+    jwtService = { verify: jest.fn() };
+    usersRepository = { findById: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SignalingGateway,
-        { provide: JwtService, useValue: { verify: jest.fn() } },
-        { provide: UsersRepository, useValue: { findById: jest.fn() } },
+        { provide: JwtService, useValue: jwtService },
+        { provide: UsersRepository, useValue: usersRepository },
         { provide: MeetingsRepository, useValue: meetingsRepository },
       ],
     }).compile();
@@ -70,6 +74,79 @@ describe('SignalingGateway', () => {
     (gateway as unknown as { server: { to: jest.Mock } }).server = {
       to: jest.fn().mockReturnValue({ emit: jest.fn() }),
     };
+  });
+
+  // ── handleConnection ──────────────────────────────────────────────────
+
+  describe('handleConnection', () => {
+    function createConnectionSocket(token?: string) {
+      return {
+        id: 'socket-conn-1',
+        data: {} as Record<string, unknown>,
+        handshake: { auth: token ? { token } : {}, headers: {} },
+        emit: jest.fn(),
+        disconnect: jest.fn(),
+        join: jest.fn(),
+        leave: jest.fn(),
+        to: jest.fn().mockReturnThis(),
+      } as unknown as Parameters<SignalingGateway['handleConnection']>[0];
+    }
+
+    it('should disconnect with 401 when no token is provided', async () => {
+      const socket = createConnectionSocket();
+
+      await gateway.handleConnection(socket);
+
+      expect(socket.emit).toHaveBeenCalledWith('error', {
+        code: 401,
+        message: 'Missing authentication token',
+      });
+      expect(socket.disconnect).toHaveBeenCalledWith(true);
+    });
+
+    it('should disconnect with 401 when JWT verification throws', async () => {
+      const socket = createConnectionSocket('bad-token');
+      jwtService.verify.mockImplementation(() => {
+        throw new Error('invalid signature');
+      });
+
+      await gateway.handleConnection(socket);
+
+      expect(socket.emit).toHaveBeenCalledWith('error', {
+        code: 401,
+        message: 'invalid signature',
+      });
+      expect(socket.disconnect).toHaveBeenCalledWith(true);
+    });
+
+    it('should disconnect with 401 when user is not found in the database', async () => {
+      const socket = createConnectionSocket('valid-token');
+      jwtService.verify.mockReturnValue({ userId: 'ghost-user' });
+      usersRepository.findById.mockResolvedValue(null);
+
+      await gateway.handleConnection(socket);
+
+      expect(socket.emit).toHaveBeenCalledWith('error', {
+        code: 401,
+        message: 'User not found',
+      });
+      expect(socket.disconnect).toHaveBeenCalledWith(true);
+    });
+
+    it('should set socket.data.user (without passwordHash) on successful auth', async () => {
+      const socket = createConnectionSocket('valid-token');
+      jwtService.verify.mockReturnValue({ userId: 'user-1' });
+      usersRepository.findById.mockResolvedValue(fakeUser);
+
+      await gateway.handleConnection(socket);
+
+      expect(socket.emit).not.toHaveBeenCalled();
+      expect(socket.disconnect).not.toHaveBeenCalled();
+      const storedUser = socket.data.user as Record<string, unknown>;
+      expect(storedUser).toBeDefined();
+      expect(storedUser.id).toBe('user-1');
+      expect(storedUser.passwordHash).toBeUndefined();
+    });
   });
 
   // ── join-room ──────────────────────────────────────────────────────────

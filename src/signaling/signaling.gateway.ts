@@ -48,7 +48,7 @@ interface ClientToServerEvents {
 }
 
 interface SocketData {
-  user?: User;
+  user?: Omit<User, 'passwordHash'>;
 }
 
 type AuthenticatedSocket = Socket<
@@ -60,7 +60,7 @@ type AuthenticatedSocket = Socket<
 
 @WebSocketGateway({
   cors: {
-    origin: 'http://localhost:5173',
+    origin: process.env.CLIENT_ORIGIN ?? 'http://localhost:5173',
     credentials: true,
   },
 })
@@ -94,7 +94,8 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
         throw new UnauthorizedException('User not found');
       }
 
-      socket.data.user = user;
+      const { passwordHash: _pw, ...safeUser } = user;
+      socket.data.user = safeUser;
       this.logger.log(`Client connected: socketId=${socket.id} userId=${user.id}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unauthorized';
@@ -125,6 +126,11 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       return;
     }
 
+    if (!payload?.meetingId || typeof payload.meetingId !== 'string') {
+      socket.emit('error', { code: 400, message: 'meetingId is required' });
+      return;
+    }
+
     const { meetingId } = payload;
 
     // Validate meeting exists
@@ -140,6 +146,9 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       socket.emit('error', { code: 403, message: 'Not a member of this meeting' });
       return;
     }
+
+    // No-op if already present in the room (prevents duplicate participant-joined events)
+    if (this.rooms.get(meetingId)?.has(socket.id)) return;
 
     // Join Socket.IO room and record presence
     await socket.join(meetingId);
@@ -158,6 +167,17 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     @MessageBody() payload: LeaveRoomPayload,
     @ConnectedSocket() socket: AuthenticatedSocket,
   ): void {
+    const user = socket.data.user;
+    if (!user) {
+      socket.emit('error', { code: 401, message: 'Not authenticated' });
+      return;
+    }
+
+    if (!payload?.meetingId || typeof payload.meetingId !== 'string') {
+      socket.emit('error', { code: 400, message: 'meetingId is required' });
+      return;
+    }
+
     const { meetingId } = payload;
     this.removeFromRoomAndBroadcast(meetingId, socket);
   }
@@ -170,6 +190,11 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     const user = socket.data.user;
     if (!user) {
       socket.emit('error', { code: 401, message: 'Not authenticated' });
+      return;
+    }
+
+    if (!payload?.meetingId || typeof payload.meetingId !== 'string') {
+      socket.emit('error', { code: 400, message: 'meetingId is required' });
       return;
     }
 
@@ -186,7 +211,11 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     socket.emit('participants-list', { meetingId, participants });
   }
 
-  private addToRoom(meetingId: string, socketId: string, user: User): ParticipantInfo {
+  private addToRoom(
+    meetingId: string,
+    socketId: string,
+    user: Omit<User, 'passwordHash'>,
+  ): ParticipantInfo {
     if (!this.rooms.has(meetingId)) {
       this.rooms.set(meetingId, new Map());
     }
