@@ -48,7 +48,7 @@ model RefreshToken {
 
 ## API Endpoints
 
-### POST /auth/login
+### POST /api/auth/login
 
 Now returns access token in response body and sets refresh token in HttpOnly cookie.
 
@@ -85,7 +85,7 @@ Set-Cookie: refreshToken=<token>; HttpOnly; Secure; SameSite=Strict; Max-Age=604
 
 ---
 
-### POST /auth/refresh
+### POST /api/auth/refresh
 
 Exchanges a valid refresh token for a new access token and rotates the refresh token.
 
@@ -114,7 +114,7 @@ Exchanges a valid refresh token for a new access token and rotates the refresh t
 
 ---
 
-### POST /auth/logout
+### POST /api/auth/logout
 
 Revokes the refresh token and clears the cookie.
 
@@ -190,7 +190,7 @@ JWT_REFRESH_EXPIRES_IN=7d
 
 ```typescript
 // Login
-const response = await fetch('/auth/login', {
+const response = await fetch('/api/auth/login', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ email, password }),
@@ -229,7 +229,7 @@ async function fetchWithTokenRefresh(url, options = {}) {
 
   // If access token expired, refresh it
   if (response.status === 401) {
-    const refreshResponse = await fetch('/auth/refresh', {
+    const refreshResponse = await fetch('/api/auth/refresh', {
       method: 'POST',
       credentials: 'include',
     });
@@ -261,7 +261,7 @@ async function fetchWithTokenRefresh(url, options = {}) {
 ### Logout
 
 ```typescript
-await fetch('/auth/logout', {
+await fetch('/api/auth/logout', {
   method: 'POST',
   credentials: 'include',
 });
@@ -275,7 +275,7 @@ localStorage.removeItem('accessToken');
 
 ```bash
 # Login
-curl -c cookies.txt -X POST http://localhost:3000/auth/login \
+curl -c cookies.txt -X POST http://localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"user@example.com","password":"password123"}'
 
@@ -287,7 +287,7 @@ curl -c cookies.txt -X POST http://localhost:3000/auth/login \
 
 ```bash
 # Use refresh token from cookie
-curl -b cookies.txt -X POST http://localhost:3000/auth/refresh
+curl -b cookies.txt -X POST http://localhost:3000/api/auth/refresh
 
 # New access token returned
 # New refresh token set in cookie
@@ -296,7 +296,7 @@ curl -b cookies.txt -X POST http://localhost:3000/auth/refresh
 ### Test Logout
 
 ```bash
-curl -b cookies.txt -X POST http://localhost:3000/auth/logout
+curl -b cookies.txt -X POST http://localhost:3000/api/auth/logout
 
 # Refresh token revoked
 # Cookie cleared

@@ -1,46 +1,60 @@
-# Authentication API
+# Auth API
 
-## Endpoints
+All routes are prefixed with `/api`.
 
-### POST /auth/register
+---
+
+## POST /api/auth/register
 
 Register a new user account.
 
-**Request Body:**
+**Auth:** Not required
+
+**Request body:**
 
 ```json
 {
   "email": "user@example.com",
   "password": "password123",
-  "name": "John Doe" // optional
+  "name": "John Doe"
 }
 ```
 
-**Success Response (201):**
+| Field      | Type   | Required | Constraints      |
+| ---------- | ------ | -------- | ---------------- |
+| `email`    | string | yes      | valid email      |
+| `password` | string | yes      | min 6 characters |
+| `name`     | string | no       | display name     |
+
+**Response `201`:**
 
 ```json
 {
-  "id": "uuid",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
   "email": "user@example.com",
   "name": "John Doe",
   "role": "USER",
-  "createdAt": "2026-02-05T00:00:00.000Z",
-  "updatedAt": "2026-02-05T00:00:00.000Z"
+  "createdAt": "2026-03-10T00:00:00.000Z",
+  "updatedAt": "2026-03-10T00:00:00.000Z"
 }
 ```
 
-**Error Responses:**
+**Error responses:**
 
-- 409 Conflict: Email already exists
-- 400 Bad Request: Invalid input data
+| Status | Reason                   |
+| ------ | ------------------------ |
+| `400`  | Validation error         |
+| `409`  | Email already registered |
 
 ---
 
-### POST /auth/login
+## POST /api/auth/login
 
-Login with email and password.
+Authenticate with email and password. Returns an access token in the response body and sets a `refreshToken` HttpOnly cookie.
 
-**Request Body:**
+**Auth:** Not required
+
+**Request body:**
 
 ```json
 {
@@ -49,66 +63,93 @@ Login with email and password.
 }
 ```
 
-**Success Response (200):**
+| Field      | Type   | Required |
+| ---------- | ------ | -------- |
+| `email`    | string | yes      |
+| `password` | string | yes      |
+
+**Response `200`:**
 
 ```json
 {
   "user": {
-    "id": "uuid",
+    "id": "550e8400-e29b-41d4-a716-446655440000",
     "email": "user@example.com",
     "name": "John Doe",
     "role": "USER",
-    "createdAt": "2026-02-05T00:00:00.000Z",
-    "updatedAt": "2026-02-05T00:00:00.000Z"
+    "createdAt": "2026-03-10T00:00:00.000Z",
+    "updatedAt": "2026-03-10T00:00:00.000Z"
   },
   "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
 ```
 
-**Error Responses:**
+**Cookie set:**
 
-- 401 Unauthorized: Invalid credentials
+```
+Set-Cookie: refreshToken=<token>; HttpOnly; Secure; SameSite=Strict; Max-Age=604800
+```
+
+**Error responses:**
+
+| Status | Reason              |
+| ------ | ------------------- |
+| `401`  | Invalid credentials |
 
 ---
 
-## Using JWT Token
+## POST /api/auth/refresh
 
-To access protected routes, include the JWT token in the Authorization header:
+Exchange the `refreshToken` HttpOnly cookie for a new access token. The old refresh token is revoked and a new one is issued (token rotation).
 
-```
-Authorization: Bearer <your-jwt-token>
-```
+**Auth:** Not required — requires `refreshToken` cookie
 
-### Example: Protected Route
+**Request body:** none
 
-```typescript
-import { Controller, Get, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
-import { CurrentUser } from './auth/decorators/current-user.decorator';
-import { UserResponseDto } from './users/dto/user-response.dto';
+**Response `200`:**
 
-@Controller('profile')
-export class ProfileController {
-  @Get()
-  @UseGuards(JwtAuthGuard)
-  getProfile(@CurrentUser() user: UserResponseDto) {
-    return user;
-  }
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
 ```
 
-## Environment Variables
+**Cookie updated:** old `refreshToken` is revoked; a new one is set with the same options.
 
-Make sure to add these to your `.env` file:
+**Error responses:**
 
-```env
-JWT_SECRET=your-super-secret-jwt-key-change-this-in-production-min-32-chars
-JWT_EXPIRES_IN=1d
+| Status | Reason                                            |
+| ------ | ------------------------------------------------- |
+| `401`  | Refresh token cookie missing, invalid, or expired |
+
+---
+
+## POST /api/auth/logout
+
+Revoke the current refresh token and clear the cookie.
+
+**Auth:** Not required — reads `refreshToken` cookie if present
+
+**Request body:** none
+
+**Response `200`:**
+
+```json
+{
+  "message": "Logged out successfully"
+}
 ```
 
-## Security Notes
+**Cookie cleared:** `refreshToken` cookie is removed.
 
-- Passwords are hashed using bcrypt with 10 salt rounds
-- JWT tokens expire after 1 day (configurable via JWT_EXPIRES_IN)
-- Email uniqueness is enforced at the database level
-- Use strong JWT secrets (minimum 32 characters) in production
+---
+
+## Authentication for protected routes
+
+Include the access token in the `Authorization` header for all protected endpoints:
+
+```
+Authorization: Bearer <accessToken>
+```
+
+See [JWT_AUTHENTICATION.md](./JWT_AUTHENTICATION.md) for implementation details and [REFRESH_TOKEN.md](./REFRESH_TOKEN.md) for the token rotation strategy.

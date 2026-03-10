@@ -145,7 +145,7 @@ createPost(
 ### 1. Login to Get Access Token
 
 ```bash
-curl -X POST http://localhost:3000/auth/login \
+curl -X POST http://localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "user@example.com",
@@ -170,7 +170,7 @@ Response:
 ### 2. Use Access Token in Requests
 
 ```bash
-curl -X GET http://localhost:3000/users/profile \
+curl -X GET http://localhost:3000/api/users/profile \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
 

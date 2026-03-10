@@ -1,8 +1,8 @@
-# Meeting API Documentation
+# Meeting API
 
-## Overview
+All routes are prefixed with `/api`. All endpoints require a valid JWT Bearer token.
 
-The Meeting module provides production-ready REST API endpoints for managing WebRTC meeting rooms with role-based access control and clean architecture.
+---
 
 ## Architecture
 
@@ -68,7 +68,7 @@ enum MeetingRole {
 
 ### 1. Create Meeting
 
-**POST /meetings**
+**POST /api/meetings**
 
 Creates a new meeting room and automatically adds the creator as HOST.
 
@@ -97,7 +97,7 @@ Creates a new meeting room and automatically adds the creator as HOST.
 **Example (cURL):**
 
 ```bash
-curl -X POST http://localhost:3000/meetings \
+curl -X POST http://localhost:3000/api/meetings \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"title": "Team Sync"}'
@@ -113,7 +113,7 @@ curl -X POST http://localhost:3000/meetings \
 
 ### 2. Join Meeting
 
-**POST /meetings/:id/join**
+**POST /api/meetings/:id/join**
 
 Adds the authenticated user to an existing meeting as PARTICIPANT.
 
@@ -176,7 +176,7 @@ Adds the authenticated user to an existing meeting as PARTICIPANT.
 **Example (cURL):**
 
 ```bash
-curl -X POST http://localhost:3000/meetings/550e8400-e29b-41d4-a716-446655440000/join \
+curl -X POST http://localhost:3000/api/meetings/550e8400-e29b-41d4-a716-446655440000/join \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
@@ -189,7 +189,7 @@ curl -X POST http://localhost:3000/meetings/550e8400-e29b-41d4-a716-446655440000
 
 ### 3. Get Meeting Details
 
-**GET /meetings/:id**
+**GET /api/meetings/:id**
 
 Retrieves meeting details including all members ordered by join time.
 
@@ -240,7 +240,7 @@ Retrieves meeting details including all members ordered by join time.
 **Example (cURL):**
 
 ```bash
-curl -X GET http://localhost:3000/meetings/550e8400-e29b-41d4-a716-446655440000 \
+curl -X GET http://localhost:3000/api/meetings/550e8400-e29b-41d4-a716-446655440000 \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
@@ -259,7 +259,7 @@ All endpoints require a valid JWT access token in the Authorization header:
 Authorization: Bearer <access_token>
 ```
 
-The user ID is extracted from the token's `sub` claim using the `@CurrentUser('sub')` decorator.
+The user ID is extracted from the JWT payload using the `@CurrentUser('id')` decorator.
 
 ## Role-Based Access Control
 
@@ -493,7 +493,7 @@ describe('POST /meetings/:id/join', () => {
 1. **User A creates meeting:**
 
    ```bash
-   POST /meetings
+   POST /api/meetings
    → Meeting created with ID: abc-123
    → User A automatically added as HOST
    ```
@@ -501,7 +501,7 @@ describe('POST /meetings/:id/join', () => {
 2. **User B joins meeting:**
 
    ```bash
-   POST /meetings/abc-123/join
+   POST /api/meetings/abc-123/join
    → User B added as PARTICIPANT
    → Returns full meeting details with members list
    ```
@@ -509,7 +509,7 @@ describe('POST /meetings/:id/join', () => {
 3. **User C gets meeting details:**
 
    ```bash
-   GET /meetings/abc-123
+   GET /api/meetings/abc-123
    → Returns meeting with all members:
      - User A (HOST, joined first)
      - User B (PARTICIPANT, joined second)
@@ -517,7 +517,7 @@ describe('POST /meetings/:id/join', () => {
 
 4. **User B tries to join again:**
    ```bash
-   POST /meetings/abc-123/join
+   POST /api/meetings/abc-123/join
    → 409 Conflict: Already a member
    ```
 
