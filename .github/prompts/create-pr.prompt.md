@@ -87,7 +87,42 @@ git branch -m <generated-branch-name>
 
 **If the current branch already follows the convention**, continue to the next step.
 
-### 5. Extract GitHub issue reference
+### 5. Create commit
+
+Stage all changes and create a commit before pushing.
+
+```bash
+git add .
+```
+
+Generate a **single-line commit message** describing the change.
+
+Rules:
+
+- One short sentence only
+- Imperative mood
+- No bullet points
+- No long explanations
+- No file names
+- Prefer under 60 characters
+
+Format:
+
+`type(scope): short description`
+
+Examples:
+
+- `perf(signaling): optimize socket lookup`
+- `fix(meeting): handle participant reconnection`
+- `refactor(auth): simplify token validation`
+
+Create the commit:
+
+```bash
+git commit -m "<generated-commit-message>"
+```
+
+### 6. Extract GitHub issue reference
 
 Attempt to extract an issue reference from:
 
@@ -101,7 +136,7 @@ Rules:
 - If an issue reference is found, include it in the PR body under `## References`.
 - If none is found, continue without adding a reference. **Do not ask the user and do not invent one.**
 
-### 6. Push the branch
+### 7. Push the branch
 
 Ensure the branch exists on the remote repository:
 
@@ -109,7 +144,7 @@ Ensure the branch exists on the remote repository:
 git push -u origin HEAD
 ```
 
-### 7. Generate PR title
+### 8. Generate PR title
 
 Generate the title using Conventional Commit format:
 
@@ -126,7 +161,7 @@ Rules:
 - Imperative mood
 - Derived from the diff
 
-### 8. Generate PR description
+### 9. Generate PR description
 
 Generate a PR body with the following structure.
 
@@ -159,7 +194,7 @@ Generate a PR body with the following structure.
 - [ ] <another verification step>
 ```
 
-### 9. Create the pull request
+### 10. Create the pull request
 
 Create the PR targeting the `develop` branch:
 
@@ -167,7 +202,7 @@ Create the PR targeting the `develop` branch:
 gh pr create --base develop --title "<generated-title>" --body "<generated-body>"
 ```
 
-### 10. Return the PR URL
+### 11. Return the PR URL
 
 Output the URL returned by `gh pr create` so the user can open and review the PR.
 
