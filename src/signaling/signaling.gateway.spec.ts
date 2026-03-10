@@ -325,6 +325,16 @@ describe('SignalingGateway', () => {
   // ── disconnect cleanup ─────────────────────────────────────────────────
 
   describe('handleDisconnect', () => {
+    it('should produce no errors or broadcasts when socket was in no rooms', () => {
+      const socket = createMockSocket();
+      const mockServer = gateway as unknown as { server: { to: jest.Mock } };
+
+      gateway.handleDisconnect(socket);
+
+      expect(mockServer.server.to).not.toHaveBeenCalled();
+      expect(socket.emit).not.toHaveBeenCalled();
+    });
+
     it('should clean up all rooms the socket was in', async () => {
       // Join two rooms
       const socket = createMockSocket();

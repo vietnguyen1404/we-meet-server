@@ -73,6 +73,9 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   /** meetingId → (socketId → ParticipantInfo) */
   private readonly rooms = new Map<string, Map<string, ParticipantInfo>>();
 
+  /** socketId → Set<meetingId> (reverse index for O(k) disconnect cleanup) */
+  private readonly socketRooms = new Map<string, Set<string>>();
+
   constructor(
     private readonly jwtService: JwtService,
     private readonly usersRepository: UsersRepository,
@@ -228,6 +231,13 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     };
 
     this.rooms.get(meetingId)!.set(socketId, participant);
+
+    // Maintain the reverse index
+    if (!this.socketRooms.has(socketId)) {
+      this.socketRooms.set(socketId, new Set());
+    }
+    this.socketRooms.get(socketId)!.add(meetingId);
+
     return participant;
   }
 
@@ -244,6 +254,15 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.rooms.delete(meetingId);
     }
 
+    // Update the reverse index
+    const socketMeetings = this.socketRooms.get(socketId);
+    if (socketMeetings) {
+      socketMeetings.delete(meetingId);
+      if (socketMeetings.size === 0) {
+        this.socketRooms.delete(socketId);
+      }
+    }
+
     return participant;
   }
 
@@ -253,7 +272,12 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   }
 
   private cleanupSocket(socket: AuthenticatedSocket): void {
-    for (const meetingId of this.rooms.keys()) {
+    const meetingIds = this.socketRooms.get(socket.id);
+    if (!meetingIds || meetingIds.size === 0) return;
+
+    // Snapshot before iterating since removeFromRoom mutates socketRooms during the loop
+    const snapshot = Array.from(meetingIds);
+    for (const meetingId of snapshot) {
       this.removeFromRoomAndBroadcast(meetingId, socket);
     }
   }
