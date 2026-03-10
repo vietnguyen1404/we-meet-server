@@ -34,17 +34,34 @@ interface GetParticipantsPayload {
   meetingId: string;
 }
 
+interface WebRtcRelayPayload {
+  meetingId: string;
+  targetSocketId: string;
+  payload: unknown;
+}
+
+interface WebRtcRelayServerPayload {
+  fromSocketId: string;
+  payload: unknown;
+}
+
 interface ServerToClientEvents {
   error: (data: { code: number; message: string }) => void;
   'participant-joined': (data: { meetingId: string; participant: ParticipantInfo }) => void;
   'participant-left': (data: { meetingId: string; participant: ParticipantInfo }) => void;
   'participants-list': (data: { meetingId: string; participants: ParticipantInfo[] }) => void;
+  'webrtc-offer': (data: WebRtcRelayServerPayload) => void;
+  'webrtc-answer': (data: WebRtcRelayServerPayload) => void;
+  'webrtc-ice-candidate': (data: WebRtcRelayServerPayload) => void;
 }
 
 interface ClientToServerEvents {
   'join-room': (payload: JoinRoomPayload) => void;
   'leave-room': (payload: LeaveRoomPayload) => void;
   'get-participants': (payload: GetParticipantsPayload) => void;
+  'webrtc-offer': (payload: WebRtcRelayPayload) => void;
+  'webrtc-answer': (payload: WebRtcRelayPayload) => void;
+  'webrtc-ice-candidate': (payload: WebRtcRelayPayload) => void;
 }
 
 interface SocketData {
@@ -212,6 +229,71 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     const participants = this.getParticipants(meetingId);
     socket.emit('participants-list', { meetingId, participants });
+  }
+
+  @SubscribeMessage('webrtc-offer')
+  handleWebRtcOffer(
+    @MessageBody() payload: WebRtcRelayPayload,
+    @ConnectedSocket() socket: AuthenticatedSocket,
+  ): void {
+    this.handleWebRtcRelay('webrtc-offer', payload, socket);
+  }
+
+  @SubscribeMessage('webrtc-answer')
+  handleWebRtcAnswer(
+    @MessageBody() payload: WebRtcRelayPayload,
+    @ConnectedSocket() socket: AuthenticatedSocket,
+  ): void {
+    this.handleWebRtcRelay('webrtc-answer', payload, socket);
+  }
+
+  @SubscribeMessage('webrtc-ice-candidate')
+  handleWebRtcIceCandidate(
+    @MessageBody() payload: WebRtcRelayPayload,
+    @ConnectedSocket() socket: AuthenticatedSocket,
+  ): void {
+    this.handleWebRtcRelay('webrtc-ice-candidate', payload, socket);
+  }
+
+  private handleWebRtcRelay(
+    event: 'webrtc-offer' | 'webrtc-answer' | 'webrtc-ice-candidate',
+    payload: WebRtcRelayPayload,
+    socket: AuthenticatedSocket,
+  ): void {
+    if (!socket.data.user) {
+      socket.emit('error', { code: 401, message: 'Not authenticated' });
+      return;
+    }
+
+    if (
+      !payload?.meetingId ||
+      typeof payload.meetingId !== 'string' ||
+      !payload?.targetSocketId ||
+      typeof payload.targetSocketId !== 'string'
+    ) {
+      socket.emit('error', { code: 400, message: 'meetingId and targetSocketId are required' });
+      return;
+    }
+
+    const { meetingId, targetSocketId } = payload;
+
+    if (!this.rooms.get(meetingId)?.has(socket.id)) {
+      socket.emit('error', { code: 403, message: 'You are not in this room' });
+      return;
+    }
+
+    if (!this.rooms.get(meetingId)?.has(targetSocketId)) {
+      socket.emit('error', { code: 404, message: 'Target socket is not in this room' });
+      return;
+    }
+
+    this.logger.log(
+      `WebRTC relay: event=${event} meetingId=${meetingId} from=${socket.id} to=${targetSocketId}`,
+    );
+
+    this.server
+      .to(targetSocketId)
+      .emit(event, { fromSocketId: socket.id, payload: payload.payload });
   }
 
   private addToRoom(

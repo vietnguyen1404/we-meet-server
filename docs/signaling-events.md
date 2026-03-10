@@ -131,7 +131,55 @@ socket.emit('leave-room', { meetingId: 'meeting-uuid' });
 
 ---
 
+## WebRTC Signaling Relay
+
+Authenticated participants who are joined to a meeting room can relay WebRTC negotiation messages to a specific peer. The server forwards the message transparently — it never parses, logs, or stores SDP or ICE candidate content.
+
+### Client → Server Events
+
+| Event                  | Payload                                                           | Description                                |
+| ---------------------- | ----------------------------------------------------------------- | ------------------------------------------ |
+| `webrtc-offer`         | `{ meetingId: string, targetSocketId: string, payload: unknown }` | Relay a WebRTC offer to the target peer.   |
+| `webrtc-answer`        | `{ meetingId: string, targetSocketId: string, payload: unknown }` | Relay a WebRTC answer to the target peer.  |
+| `webrtc-ice-candidate` | `{ meetingId: string, targetSocketId: string, payload: unknown }` | Relay an ICE candidate to the target peer. |
+
+### Server → Client Events (relayed to target)
+
+| Event                  | Payload                                      | Description                              |
+| ---------------------- | -------------------------------------------- | ---------------------------------------- |
+| `webrtc-offer`         | `{ fromSocketId: string, payload: unknown }` | Forwarded offer from a peer.             |
+| `webrtc-answer`        | `{ fromSocketId: string, payload: unknown }` | Forwarded answer from a peer.            |
+| `webrtc-ice-candidate` | `{ fromSocketId: string, payload: unknown }` | Forwarded ICE candidate from a peer.     |
+| `error`                | `{ code: number, message: string }`          | Emitted to sender on validation failure. |
+
+### Error Codes
+
+| Code  | Meaning                                           |
+| ----- | ------------------------------------------------- |
+| `400` | Missing or invalid `meetingId` / `targetSocketId` |
+| `401` | Not authenticated                                 |
+| `403` | Sender is not joined to the specified room        |
+| `404` | Target socket is not in the room                  |
+
+### Example: Sending a WebRTC Offer
+
+```js
+// After both peers have joined the same room...
+socket.emit('webrtc-offer', {
+  meetingId: 'meeting-uuid',
+  targetSocketId: 'target-socket-id',
+  payload: { type: 'offer', sdp: '<sdp-string>' },
+});
+
+// The target peer receives:
+socket.on('webrtc-offer', ({ fromSocketId, payload }) => {
+  console.log(`Offer from ${fromSocketId}`, payload);
+  // createAnswer and relay back via webrtc-answer
+});
+```
+
+---
+
 ## Out of Scope
 
-- WebRTC offer/answer/ICE relay
 - Distributed presence (Redis adapter)

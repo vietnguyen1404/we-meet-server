@@ -322,6 +322,152 @@ describe('SignalingGateway', () => {
     });
   });
 
+  describe('handleWebRtcOffer / handleWebRtcAnswer / handleWebRtcIceCandidate', () => {
+    const meetingId = 'meeting-1';
+    const targetSocketId = 'socket-target';
+
+    async function setupSenderAndTarget() {
+      // Sender joins the room
+      const sender = createMockSocket({ id: 'socket-1' });
+      sender.data.user = fakeUser as never;
+      meetingsRepository.findById.mockResolvedValue({ id: meetingId });
+      meetingsRepository.findMemberByMeetingAndUser.mockResolvedValue({ id: 'member-1' });
+      (sender.to as jest.Mock).mockReturnValue({ emit: jest.fn() });
+      await gateway.handleJoinRoom({ meetingId }, sender);
+
+      // Target joins the room
+      const target = createMockSocket({ id: targetSocketId });
+      target.data.user = fakeUser2 as never;
+      meetingsRepository.findMemberByMeetingAndUser.mockResolvedValue({ id: 'member-2' });
+      (target.to as jest.Mock).mockReturnValue({ emit: jest.fn() });
+      await gateway.handleJoinRoom({ meetingId }, target);
+
+      return { sender, target };
+    }
+
+    it('should relay webrtc-offer to the target socket', async () => {
+      const { sender } = await setupSenderAndTarget();
+
+      const serverEmit = jest.fn();
+      const mockServer = gateway as unknown as { server: { to: jest.Mock } };
+      mockServer.server.to.mockReturnValue({ emit: serverEmit });
+
+      gateway.handleWebRtcOffer(
+        { meetingId, targetSocketId, payload: { sdp: 'REDACTED' } },
+        sender,
+      );
+
+      expect(mockServer.server.to).toHaveBeenCalledWith(targetSocketId);
+      expect(serverEmit).toHaveBeenCalledWith('webrtc-offer', {
+        fromSocketId: 'socket-1',
+        payload: { sdp: 'REDACTED' },
+      });
+    });
+
+    it('should relay webrtc-answer to the target socket', async () => {
+      const { sender } = await setupSenderAndTarget();
+
+      const serverEmit = jest.fn();
+      const mockServer = gateway as unknown as { server: { to: jest.Mock } };
+      mockServer.server.to.mockReturnValue({ emit: serverEmit });
+
+      gateway.handleWebRtcAnswer({ meetingId, targetSocketId, payload: { sdp: 'answer' } }, sender);
+
+      expect(mockServer.server.to).toHaveBeenCalledWith(targetSocketId);
+      expect(serverEmit).toHaveBeenCalledWith('webrtc-answer', {
+        fromSocketId: 'socket-1',
+        payload: { sdp: 'answer' },
+      });
+    });
+
+    it('should relay webrtc-ice-candidate to the target socket', async () => {
+      const { sender } = await setupSenderAndTarget();
+
+      const serverEmit = jest.fn();
+      const mockServer = gateway as unknown as { server: { to: jest.Mock } };
+      mockServer.server.to.mockReturnValue({ emit: serverEmit });
+
+      gateway.handleWebRtcIceCandidate(
+        { meetingId, targetSocketId, payload: { candidate: 'REDACTED' } },
+        sender,
+      );
+
+      expect(mockServer.server.to).toHaveBeenCalledWith(targetSocketId);
+      expect(serverEmit).toHaveBeenCalledWith('webrtc-ice-candidate', {
+        fromSocketId: 'socket-1',
+        payload: { candidate: 'REDACTED' },
+      });
+    });
+
+    it('should emit 401 when sender is not authenticated', () => {
+      const socket = createMockSocket();
+      socket.data.user = undefined;
+
+      gateway.handleWebRtcOffer({ meetingId, targetSocketId, payload: {} }, socket);
+
+      expect(socket.emit).toHaveBeenCalledWith('error', {
+        code: 401,
+        message: 'Not authenticated',
+      });
+    });
+
+    it('should emit 400 when meetingId is missing', () => {
+      const socket = createMockSocket();
+      socket.data.user = fakeUser as never;
+
+      gateway.handleWebRtcOffer({ meetingId: '', targetSocketId, payload: {} }, socket);
+
+      expect(socket.emit).toHaveBeenCalledWith('error', {
+        code: 400,
+        message: 'meetingId and targetSocketId are required',
+      });
+    });
+
+    it('should emit 400 when targetSocketId is missing', () => {
+      const socket = createMockSocket();
+      socket.data.user = fakeUser as never;
+
+      gateway.handleWebRtcOffer({ meetingId, targetSocketId: '', payload: {} }, socket);
+
+      expect(socket.emit).toHaveBeenCalledWith('error', {
+        code: 400,
+        message: 'meetingId and targetSocketId are required',
+      });
+    });
+
+    it('should emit 403 when sender is not in the room', () => {
+      const socket = createMockSocket({ id: 'socket-not-in-room' });
+      socket.data.user = fakeUser as never;
+
+      gateway.handleWebRtcOffer({ meetingId, targetSocketId, payload: {} }, socket);
+
+      expect(socket.emit).toHaveBeenCalledWith('error', {
+        code: 403,
+        message: 'You are not in this room',
+      });
+    });
+
+    it('should emit 404 when target is not in the room', async () => {
+      // Only sender joins
+      const socket = createMockSocket({ id: 'socket-1' });
+      socket.data.user = fakeUser as never;
+      meetingsRepository.findById.mockResolvedValue({ id: meetingId });
+      meetingsRepository.findMemberByMeetingAndUser.mockResolvedValue({ id: 'member-1' });
+      (socket.to as jest.Mock).mockReturnValue({ emit: jest.fn() });
+      await gateway.handleJoinRoom({ meetingId }, socket);
+
+      gateway.handleWebRtcOffer(
+        { meetingId, targetSocketId: 'socket-not-in-room', payload: {} },
+        socket,
+      );
+
+      expect(socket.emit).toHaveBeenCalledWith('error', {
+        code: 404,
+        message: 'Target socket is not in this room',
+      });
+    });
+  });
+
   // ── disconnect cleanup ─────────────────────────────────────────────────
 
   describe('handleDisconnect', () => {
