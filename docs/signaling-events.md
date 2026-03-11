@@ -71,12 +71,12 @@ Authenticated clients can join meeting rooms, receive presence updates, and requ
 
 ### Server → Client Events
 
-| Event                | Payload                                                  | Description                                             |
-| -------------------- | -------------------------------------------------------- | ------------------------------------------------------- |
-| `participant-joined` | `{ meetingId: string, participant: ParticipantInfo }`    | Broadcast to room members when a new participant joins. |
-| `participant-left`   | `{ meetingId: string, participant: ParticipantInfo }`    | Broadcast to room members when a participant leaves.    |
-| `participants-list`  | `{ meetingId: string, participants: ParticipantInfo[] }` | Response to `get-participants`.                         |
-| `error`              | `{ code: number, message: string }`                      | Error response (e.g., 403, 404).                        |
+| Event                | Payload                                                  | Description                                                                                        |
+| -------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `participant-joined` | `{ meetingId: string, participant: ParticipantInfo }`    | Broadcast to all other room members when a new participant joins.                                  |
+| `participant-left`   | `{ meetingId: string, participant: ParticipantInfo }`    | Broadcast to all remaining room members when a participant leaves or disconnects.                  |
+| `participants-list`  | `{ meetingId: string, participants: ParticipantInfo[] }` | Sent to the joining socket automatically after `join-room`, and in response to `get-participants`. |
+| `error`              | `{ code: number, message: string }`                      | Error response (e.g., 401, 403, 404).                                                              |
 
 ### `ParticipantInfo`
 
@@ -103,6 +103,12 @@ interface ParticipantInfo {
 // After connecting with a valid JWT...
 socket.emit('join-room', { meetingId: 'meeting-uuid' });
 
+// The server automatically sends the current participant list to the joining socket.
+// No need to emit get-participants manually after join-room.
+socket.on('participants-list', ({ meetingId, participants }) => {
+  console.log(`Current participants in ${meetingId}:`, participants);
+});
+
 // Listen for other participants joining
 socket.on('participant-joined', ({ meetingId, participant }) => {
   console.log(`${participant.name} joined meeting ${meetingId}`);
@@ -113,14 +119,17 @@ socket.on('participant-left', ({ meetingId, participant }) => {
   console.log(`${participant.name} left meeting ${meetingId}`);
 });
 
-// Request the current participant list
-socket.emit('get-participants', { meetingId: 'meeting-uuid' });
-socket.on('participants-list', ({ meetingId, participants }) => {
-  console.log(`Participants in ${meetingId}:`, participants);
-});
-
-// Leave a room
+// Leave a room explicitly
 socket.emit('leave-room', { meetingId: 'meeting-uuid' });
+```
+
+### `get-participants` — On-demand participant list
+
+The client can still request the participant list at any time after joining:
+
+```js
+socket.emit('get-participants', { meetingId: 'meeting-uuid' });
+// server responds with participants-list
 ```
 
 ### Presence State
