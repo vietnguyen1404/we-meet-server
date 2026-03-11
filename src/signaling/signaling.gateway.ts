@@ -16,10 +16,14 @@ import { MeetingsRepository } from '../meetings/meetings.repository';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 
 export interface ParticipantInfo {
+  socketId: string;
   userId: string;
   name: string;
-  socketId: string;
-  joinedAt: Date;
+  joinedAt: number;
+}
+
+interface WatchMeetingPayload {
+  meetingId: string;
 }
 
 interface JoinRoomPayload {
@@ -30,17 +34,13 @@ interface LeaveRoomPayload {
   meetingId: string;
 }
 
-interface GetParticipantsPayload {
-  meetingId: string;
-}
-
-interface WebRtcRelayPayload {
+interface SignalingRelayPayload {
   meetingId: string;
   targetSocketId: string;
   payload: unknown;
 }
 
-interface WebRtcRelayServerPayload {
+interface SignalingRelayServerPayload {
   fromSocketId: string;
   payload: unknown;
 }
@@ -50,18 +50,18 @@ interface ServerToClientEvents {
   'participant-joined': (data: { meetingId: string; participant: ParticipantInfo }) => void;
   'participant-left': (data: { meetingId: string; participant: ParticipantInfo }) => void;
   'participants-list': (data: { meetingId: string; participants: ParticipantInfo[] }) => void;
-  'webrtc-offer': (data: WebRtcRelayServerPayload) => void;
-  'webrtc-answer': (data: WebRtcRelayServerPayload) => void;
-  'webrtc-ice-candidate': (data: WebRtcRelayServerPayload) => void;
+  offer: (data: SignalingRelayServerPayload) => void;
+  answer: (data: SignalingRelayServerPayload) => void;
+  'ice-candidate': (data: SignalingRelayServerPayload) => void;
 }
 
 interface ClientToServerEvents {
+  'watch-meeting': (payload: WatchMeetingPayload) => void;
   'join-room': (payload: JoinRoomPayload) => void;
   'leave-room': (payload: LeaveRoomPayload) => void;
-  'get-participants': (payload: GetParticipantsPayload) => void;
-  'webrtc-offer': (payload: WebRtcRelayPayload) => void;
-  'webrtc-answer': (payload: WebRtcRelayPayload) => void;
-  'webrtc-ice-candidate': (payload: WebRtcRelayPayload) => void;
+  offer: (payload: SignalingRelayPayload) => void;
+  answer: (payload: SignalingRelayPayload) => void;
+  'ice-candidate': (payload: SignalingRelayPayload) => void;
 }
 
 interface SocketData {
@@ -135,6 +135,41 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.cleanupSocket(socket);
   }
 
+  @SubscribeMessage('watch-meeting')
+  async handleWatchMeeting(
+    @MessageBody() payload: WatchMeetingPayload,
+    @ConnectedSocket() socket: AuthenticatedSocket,
+  ): Promise<void> {
+    if (!socket.data.user) {
+      socket.emit('error', { code: 401, message: 'Not authenticated' });
+      return;
+    }
+
+    if (!payload?.meetingId || typeof payload.meetingId !== 'string') {
+      socket.emit('error', { code: 400, message: 'meetingId is required' });
+      return;
+    }
+
+    const { meetingId } = payload;
+
+    // Validate meeting exists
+    const meeting = await this.meetingsRepository.findById(meetingId);
+    if (!meeting) {
+      socket.emit('error', { code: 404, message: `Meeting ${meetingId} not found` });
+      return;
+    }
+
+    const watchRoom = `watch:${meetingId}`;
+    await socket.join(watchRoom);
+    this.logger.log(`Watcher joined lobby: meetingId=${meetingId} socketId=${socket.id}`);
+
+    // Send the current participant list to the watcher
+    socket.emit('participants-list', {
+      meetingId,
+      participants: this.getParticipants(meetingId),
+    });
+  }
+
   @SubscribeMessage('join-room')
   async handleJoinRoom(
     @MessageBody() payload: JoinRoomPayload,
@@ -160,7 +195,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       return;
     }
 
-    // Validate user is a member of the meeting
+    // Validate user is a DB member of the meeting
     const membership = await this.meetingsRepository.findMemberByMeetingAndUser(meetingId, user.id);
     if (!membership) {
       socket.emit('error', { code: 403, message: 'Not a member of this meeting' });
@@ -170,7 +205,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     // No-op if already present in the room (prevents duplicate participant-joined events)
     if (this.rooms.get(meetingId)?.has(socket.id)) return;
 
-    // Join Socket.IO room and record presence
+    // Join the video-call Socket.IO room and record presence
     await socket.join(meetingId);
     const participant = this.addToRoom(meetingId, socket.id, user);
 
@@ -178,8 +213,18 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       `User joined room: meetingId=${meetingId} socketId=${socket.id} userId=${user.id}`,
     );
 
-    // Broadcast to other room members
-    socket.to(meetingId).emit('participant-joined', { meetingId, participant });
+    // Broadcast participant-joined to video-call participants and lobby watchers
+    // socket.to() excludes the sender; emit to the union of both rooms
+    socket.to(meetingId).to(`watch:${meetingId}`).emit('participant-joined', {
+      meetingId,
+      participant,
+    });
+
+    // Send the current participant list to the joining socket
+    socket.emit('participants-list', {
+      meetingId,
+      participants: this.getParticipants(meetingId),
+    });
   }
 
   @SubscribeMessage('leave-room')
@@ -202,62 +247,33 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.removeFromRoomAndBroadcast(meetingId, socket);
   }
 
-  @SubscribeMessage('get-participants')
-  async handleGetParticipants(
-    @MessageBody() payload: GetParticipantsPayload,
-    @ConnectedSocket() socket: AuthenticatedSocket,
-  ): Promise<void> {
-    const user = socket.data.user;
-    if (!user) {
-      socket.emit('error', { code: 401, message: 'Not authenticated' });
-      return;
-    }
-
-    if (!payload?.meetingId || typeof payload.meetingId !== 'string') {
-      socket.emit('error', { code: 400, message: 'meetingId is required' });
-      return;
-    }
-
-    const { meetingId } = payload;
-
-    // Validate user is a member of the meeting
-    const membership = await this.meetingsRepository.findMemberByMeetingAndUser(meetingId, user.id);
-    if (!membership) {
-      socket.emit('error', { code: 403, message: 'Not a member of this meeting' });
-      return;
-    }
-
-    const participants = this.getParticipants(meetingId);
-    socket.emit('participants-list', { meetingId, participants });
-  }
-
-  @SubscribeMessage('webrtc-offer')
-  handleWebRtcOffer(
-    @MessageBody() payload: WebRtcRelayPayload,
+  @SubscribeMessage('offer')
+  handleOffer(
+    @MessageBody() payload: SignalingRelayPayload,
     @ConnectedSocket() socket: AuthenticatedSocket,
   ): void {
-    this.handleWebRtcRelay('webrtc-offer', payload, socket);
+    this.handleSignalingRelay('offer', payload, socket);
   }
 
-  @SubscribeMessage('webrtc-answer')
-  handleWebRtcAnswer(
-    @MessageBody() payload: WebRtcRelayPayload,
+  @SubscribeMessage('answer')
+  handleAnswer(
+    @MessageBody() payload: SignalingRelayPayload,
     @ConnectedSocket() socket: AuthenticatedSocket,
   ): void {
-    this.handleWebRtcRelay('webrtc-answer', payload, socket);
+    this.handleSignalingRelay('answer', payload, socket);
   }
 
-  @SubscribeMessage('webrtc-ice-candidate')
-  handleWebRtcIceCandidate(
-    @MessageBody() payload: WebRtcRelayPayload,
+  @SubscribeMessage('ice-candidate')
+  handleIceCandidate(
+    @MessageBody() payload: SignalingRelayPayload,
     @ConnectedSocket() socket: AuthenticatedSocket,
   ): void {
-    this.handleWebRtcRelay('webrtc-ice-candidate', payload, socket);
+    this.handleSignalingRelay('ice-candidate', payload, socket);
   }
 
-  private handleWebRtcRelay(
-    event: 'webrtc-offer' | 'webrtc-answer' | 'webrtc-ice-candidate',
-    payload: WebRtcRelayPayload,
+  private handleSignalingRelay(
+    event: 'offer' | 'answer' | 'ice-candidate',
+    payload: SignalingRelayPayload,
     socket: AuthenticatedSocket,
   ): void {
     if (!socket.data.user) {
@@ -306,10 +322,10 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
 
     const participant: ParticipantInfo = {
+      socketId,
       userId: user.id,
       name: user.name ?? 'Anonymous',
-      socketId,
-      joinedAt: new Date(),
+      joinedAt: Date.now(),
     };
 
     this.rooms.get(meetingId)!.set(socketId, participant);
@@ -373,7 +389,11 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       `User left room: meetingId=${meetingId} socketId=${socket.id} userId=${participant.userId}`,
     );
 
-    this.server.to(meetingId).emit('participant-left', { meetingId, participant });
+    // Notify video-call participants and lobby watchers
+    this.server
+      .to(meetingId)
+      .to(`watch:${meetingId}`)
+      .emit('participant-left', { meetingId, participant });
   }
 
   private extractToken(socket: AuthenticatedSocket): string | undefined {
