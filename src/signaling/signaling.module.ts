@@ -1,11 +1,19 @@
 import { Module } from '@nestjs/common';
 import { SignalingGateway } from './signaling.gateway';
+import { SignalingSessionService } from './signaling-session.service';
+import { SIGNALING_SESSION_SERVICE } from './signaling-session.interface';
 import { AuthModule } from '../auth/auth.module';
 import { UsersModule } from '../users/users.module';
 import { MeetingsModule } from '../meetings/meetings.module';
 
 @Module({
   imports: [AuthModule, UsersModule, MeetingsModule],
-  providers: [SignalingGateway],
+  providers: [
+    SignalingGateway,
+    {
+      provide: SIGNALING_SESSION_SERVICE,
+      useClass: SignalingSessionService,
+    },
+  ],
 })
 export class SignalingModule {}

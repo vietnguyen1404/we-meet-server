@@ -7,38 +7,26 @@ import {
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
-import { Logger, UnauthorizedException } from '@nestjs/common';
+import { Inject, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import { User } from '@prisma/client';
+import { plainToInstance } from 'class-transformer';
+import { validateSync, ValidationError } from 'class-validator';
 import { UsersRepository } from '../users/users.repository';
 import { MeetingsRepository } from '../meetings/meetings.repository';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { SIGNALING_SESSION_SERVICE } from './signaling-session.interface';
+import type { ISignalingSessionService, ParticipantInfo } from './signaling-session.interface';
+import { WatchMeetingDto } from './dto/watch-meeting.dto';
+import { JoinRoomDto } from './dto/join-room.dto';
+import { LeaveRoomDto } from './dto/leave-room.dto';
+import { RelayDto } from './dto/relay.dto';
 
-export interface ParticipantInfo {
-  socketId: string;
-  userId: string;
-  name: string;
-  joinedAt: number;
-}
+const RELAY_RATE_LIMIT = 30;
+const RELAY_RATE_WINDOW_MS = 10_000;
 
-interface WatchMeetingPayload {
-  meetingId: string;
-}
-
-interface JoinRoomPayload {
-  meetingId: string;
-}
-
-interface LeaveRoomPayload {
-  meetingId: string;
-}
-
-interface SignalingRelayPayload {
-  meetingId: string;
-  targetSocketId: string;
-  payload: unknown;
-}
+export type { ParticipantInfo };
 
 interface SignalingRelayServerPayload {
   fromSocketId: string;
@@ -56,12 +44,12 @@ interface ServerToClientEvents {
 }
 
 interface ClientToServerEvents {
-  'watch-meeting': (payload: WatchMeetingPayload) => void;
-  'join-room': (payload: JoinRoomPayload) => void;
-  'leave-room': (payload: LeaveRoomPayload) => void;
-  offer: (payload: SignalingRelayPayload) => void;
-  answer: (payload: SignalingRelayPayload) => void;
-  'ice-candidate': (payload: SignalingRelayPayload) => void;
+  'watch-meeting': (payload: WatchMeetingDto) => void;
+  'join-room': (payload: JoinRoomDto) => void;
+  'leave-room': (payload: LeaveRoomDto) => void;
+  offer: (payload: RelayDto) => void;
+  answer: (payload: RelayDto) => void;
+  'ice-candidate': (payload: RelayDto) => void;
 }
 
 interface SocketData {
@@ -75,6 +63,11 @@ type AuthenticatedSocket = Socket<
   SocketData
 >;
 
+interface RateBucket {
+  count: number;
+  windowStart: number;
+}
+
 @WebSocketGateway({
   cors: {
     origin: process.env.CLIENT_ORIGIN ?? 'http://localhost:5173',
@@ -87,16 +80,15 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   private readonly logger = new Logger(SignalingGateway.name);
 
-  /** meetingId → (socketId → ParticipantInfo) */
-  private readonly rooms = new Map<string, Map<string, ParticipantInfo>>();
-
-  /** socketId → Set<meetingId> (reverse index for O(k) disconnect cleanup) */
-  private readonly socketRooms = new Map<string, Set<string>>();
+  /** Per-socket relay rate-limit tracking (I/O concern — kept in gateway) */
+  private readonly rateLimits = new Map<string, RateBucket>();
 
   constructor(
     private readonly jwtService: JwtService,
     private readonly usersRepository: UsersRepository,
     private readonly meetingsRepository: MeetingsRepository,
+    @Inject(SIGNALING_SESSION_SERVICE)
+    private readonly sessionService: ISignalingSessionService,
   ) {}
 
   async handleConnection(socket: AuthenticatedSocket): Promise<void> {
@@ -116,10 +108,14 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
       const { passwordHash: _pw, ...safeUser } = user;
       socket.data.user = safeUser;
-      this.logger.log(`Client connected: socketId=${socket.id} userId=${user.id}`);
+      this.logger.log(
+        `event=connect socketId=${socket.id} userId=${user.id} ts=${new Date().toISOString()}`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unauthorized';
-      this.logger.warn(`Connection rejected: socketId=${socket.id} reason=${message}`);
+      this.logger.warn(
+        `event=connect-rejected socketId=${socket.id} reason=${message} ts=${new Date().toISOString()}`,
+      );
       socket.emit('error', { code: 401, message });
       socket.disconnect(true);
     }
@@ -128,16 +124,19 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
   handleDisconnect(socket: AuthenticatedSocket): void {
     const userId: string | undefined = socket.data.user?.id;
     this.logger.log(
-      `Client disconnected: socketId=${socket.id} userId=${userId ?? 'unauthenticated'}`,
+      `event=disconnect socketId=${socket.id} userId=${userId ?? 'unauthenticated'} ts=${new Date().toISOString()}`,
     );
 
-    // Clean up presence for every room this socket was in
+    // Clean up rate-limit bucket
+    this.rateLimits.delete(socket.id);
+
+    // Clean up presence in all rooms this socket was in
     this.cleanupSocket(socket);
   }
 
   @SubscribeMessage('watch-meeting')
   async handleWatchMeeting(
-    @MessageBody() payload: WatchMeetingPayload,
+    @MessageBody() raw: unknown,
     @ConnectedSocket() socket: AuthenticatedSocket,
   ): Promise<void> {
     if (!socket.data.user) {
@@ -145,34 +144,40 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       return;
     }
 
-    if (!payload?.meetingId || typeof payload.meetingId !== 'string') {
-      socket.emit('error', { code: 400, message: 'meetingId is required' });
-      return;
-    }
+    const dto = this.validateSocketPayload(WatchMeetingDto, raw, socket);
+    if (!dto) return;
 
-    const { meetingId } = payload;
+    const { meetingId } = dto;
 
-    // Validate meeting exists
     const meeting = await this.meetingsRepository.findById(meetingId);
     if (!meeting) {
       socket.emit('error', { code: 404, message: `Meeting ${meetingId} not found` });
       return;
     }
 
-    const watchRoom = `watch:${meetingId}`;
-    await socket.join(watchRoom);
-    this.logger.log(`Watcher joined lobby: meetingId=${meetingId} socketId=${socket.id}`);
+    const membership = await this.meetingsRepository.findMemberByMeetingAndUser(
+      meetingId,
+      socket.data.user.id,
+    );
+    if (!membership) {
+      socket.emit('error', { code: 403, message: 'Not a member of this meeting' });
+      return;
+    }
 
-    // Send the current participant list to the watcher
+    await socket.join(`watch:${meetingId}`);
+    this.logger.log(
+      `event=watch-meeting meetingId=${meetingId} socketId=${socket.id} userId=${socket.data.user.id} ts=${new Date().toISOString()}`,
+    );
+
     socket.emit('participants-list', {
       meetingId,
-      participants: this.getParticipants(meetingId),
+      participants: this.sessionService.getParticipants(meetingId),
     });
   }
 
   @SubscribeMessage('join-room')
   async handleJoinRoom(
-    @MessageBody() payload: JoinRoomPayload,
+    @MessageBody() raw: unknown,
     @ConnectedSocket() socket: AuthenticatedSocket,
   ): Promise<void> {
     const user = socket.data.user;
@@ -181,55 +186,48 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       return;
     }
 
-    if (!payload?.meetingId || typeof payload.meetingId !== 'string') {
-      socket.emit('error', { code: 400, message: 'meetingId is required' });
-      return;
-    }
+    const dto = this.validateSocketPayload(JoinRoomDto, raw, socket);
+    if (!dto) return;
 
-    const { meetingId } = payload;
+    const { meetingId } = dto;
 
-    // Validate meeting exists
     const meeting = await this.meetingsRepository.findById(meetingId);
     if (!meeting) {
       socket.emit('error', { code: 404, message: `Meeting ${meetingId} not found` });
       return;
     }
 
-    // Validate user is a DB member of the meeting
     const membership = await this.meetingsRepository.findMemberByMeetingAndUser(meetingId, user.id);
     if (!membership) {
       socket.emit('error', { code: 403, message: 'Not a member of this meeting' });
       return;
     }
 
-    // No-op if already present in the room (prevents duplicate participant-joined events)
-    if (this.rooms.get(meetingId)?.has(socket.id)) return;
+    // No-op if already present — prevents duplicate participant-joined broadcasts
+    if (this.sessionService.isParticipant(meetingId, socket.id)) return;
 
-    // Join the video-call Socket.IO room and record presence
     await socket.join(meetingId);
-    const participant = this.addToRoom(meetingId, socket.id, user);
+    const participant = this.sessionService.addParticipant(meetingId, socket.id, user);
 
     this.logger.log(
-      `User joined room: meetingId=${meetingId} socketId=${socket.id} userId=${user.id}`,
+      `event=join-room meetingId=${meetingId} socketId=${socket.id} userId=${user.id} ts=${new Date().toISOString()}`,
     );
 
-    // Broadcast participant-joined to video-call participants and lobby watchers
-    // socket.to() excludes the sender; emit to the union of both rooms
+    // Broadcast to call room + lobby watchers; socket.to() excludes the sender
     socket.to(meetingId).to(`watch:${meetingId}`).emit('participant-joined', {
       meetingId,
       participant,
     });
 
-    // Send the current participant list to the joining socket
     socket.emit('participants-list', {
       meetingId,
-      participants: this.getParticipants(meetingId),
+      participants: this.sessionService.getParticipants(meetingId),
     });
   }
 
   @SubscribeMessage('leave-room')
   handleLeaveRoom(
-    @MessageBody() payload: LeaveRoomPayload,
+    @MessageBody() raw: unknown,
     @ConnectedSocket() socket: AuthenticatedSocket,
   ): void {
     const user = socket.data.user;
@@ -238,42 +236,37 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       return;
     }
 
-    if (!payload?.meetingId || typeof payload.meetingId !== 'string') {
-      socket.emit('error', { code: 400, message: 'meetingId is required' });
-      return;
-    }
+    const dto = this.validateSocketPayload(LeaveRoomDto, raw, socket);
+    if (!dto) return;
 
-    const { meetingId } = payload;
-    this.removeFromRoomAndBroadcast(meetingId, socket);
+    this.logger.log(
+      `event=leave-room meetingId=${dto.meetingId} socketId=${socket.id} userId=${user.id} ts=${new Date().toISOString()}`,
+    );
+
+    this.removeFromRoomAndBroadcast(dto.meetingId, socket);
   }
 
   @SubscribeMessage('offer')
-  handleOffer(
-    @MessageBody() payload: SignalingRelayPayload,
-    @ConnectedSocket() socket: AuthenticatedSocket,
-  ): void {
-    this.handleSignalingRelay('offer', payload, socket);
+  handleOffer(@MessageBody() raw: unknown, @ConnectedSocket() socket: AuthenticatedSocket): void {
+    this.handleSignalingRelay('offer', raw, socket);
   }
 
   @SubscribeMessage('answer')
-  handleAnswer(
-    @MessageBody() payload: SignalingRelayPayload,
-    @ConnectedSocket() socket: AuthenticatedSocket,
-  ): void {
-    this.handleSignalingRelay('answer', payload, socket);
+  handleAnswer(@MessageBody() raw: unknown, @ConnectedSocket() socket: AuthenticatedSocket): void {
+    this.handleSignalingRelay('answer', raw, socket);
   }
 
   @SubscribeMessage('ice-candidate')
   handleIceCandidate(
-    @MessageBody() payload: SignalingRelayPayload,
+    @MessageBody() raw: unknown,
     @ConnectedSocket() socket: AuthenticatedSocket,
   ): void {
-    this.handleSignalingRelay('ice-candidate', payload, socket);
+    this.handleSignalingRelay('ice-candidate', raw, socket);
   }
 
   private handleSignalingRelay(
     event: 'offer' | 'answer' | 'ice-candidate',
-    payload: SignalingRelayPayload,
+    raw: unknown,
     socket: AuthenticatedSocket,
   ): void {
     if (!socket.data.user) {
@@ -281,119 +274,104 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
       return;
     }
 
-    if (
-      !payload?.meetingId ||
-      typeof payload.meetingId !== 'string' ||
-      !payload?.targetSocketId ||
-      typeof payload.targetSocketId !== 'string'
-    ) {
-      socket.emit('error', { code: 400, message: 'meetingId and targetSocketId are required' });
-      return;
-    }
+    const dto = this.validateSocketPayload(RelayDto, raw, socket);
+    if (!dto) return;
 
-    const { meetingId, targetSocketId } = payload;
+    if (!this.checkRateLimit(socket)) return;
 
-    if (!this.rooms.get(meetingId)?.has(socket.id)) {
+    const { meetingId, targetSocketId } = dto;
+
+    if (!this.sessionService.isParticipant(meetingId, socket.id)) {
       socket.emit('error', { code: 403, message: 'You are not in this room' });
       return;
     }
 
-    if (!this.rooms.get(meetingId)?.has(targetSocketId)) {
+    if (!this.sessionService.isParticipant(meetingId, targetSocketId)) {
       socket.emit('error', { code: 404, message: 'Target socket is not in this room' });
       return;
     }
 
     this.logger.log(
-      `WebRTC relay: event=${event} meetingId=${meetingId} from=${socket.id} to=${targetSocketId}`,
+      `event=${event} meetingId=${meetingId} socketId=${socket.id} userId=${socket.data.user.id} targetSocketId=${targetSocketId} ts=${new Date().toISOString()}`,
+    );
+
+    this.server.to(targetSocketId).emit(event, { fromSocketId: socket.id, payload: dto.payload });
+  }
+
+  private removeFromRoomAndBroadcast(meetingId: string, socket: AuthenticatedSocket): void {
+    const participant = this.sessionService.removeParticipant(meetingId, socket.id);
+    if (!participant) return;
+
+    void socket.leave(meetingId);
+    this.logger.log(
+      `event=left-room meetingId=${meetingId} socketId=${socket.id} userId=${participant.userId} ts=${new Date().toISOString()}`,
     );
 
     this.server
-      .to(targetSocketId)
-      .emit(event, { fromSocketId: socket.id, payload: payload.payload });
-  }
-
-  private addToRoom(
-    meetingId: string,
-    socketId: string,
-    user: Omit<User, 'passwordHash'>,
-  ): ParticipantInfo {
-    if (!this.rooms.has(meetingId)) {
-      this.rooms.set(meetingId, new Map());
-    }
-
-    const participant: ParticipantInfo = {
-      socketId,
-      userId: user.id,
-      name: user.name ?? 'Anonymous',
-      joinedAt: Date.now(),
-    };
-
-    this.rooms.get(meetingId)!.set(socketId, participant);
-
-    // Maintain the reverse index
-    if (!this.socketRooms.has(socketId)) {
-      this.socketRooms.set(socketId, new Set());
-    }
-    this.socketRooms.get(socketId)!.add(meetingId);
-
-    return participant;
-  }
-
-  private removeFromRoom(meetingId: string, socketId: string): ParticipantInfo | undefined {
-    const room = this.rooms.get(meetingId);
-    if (!room) return undefined;
-
-    const participant = room.get(socketId);
-    if (!participant) return undefined;
-
-    room.delete(socketId);
-
-    if (room.size === 0) {
-      this.rooms.delete(meetingId);
-    }
-
-    // Update the reverse index
-    const socketMeetings = this.socketRooms.get(socketId);
-    if (socketMeetings) {
-      socketMeetings.delete(meetingId);
-      if (socketMeetings.size === 0) {
-        this.socketRooms.delete(socketId);
-      }
-    }
-
-    return participant;
-  }
-
-  private getParticipants(meetingId: string): ParticipantInfo[] {
-    const room = this.rooms.get(meetingId);
-    return room ? Array.from(room.values()) : [];
+      .to(meetingId)
+      .to(`watch:${meetingId}`)
+      .emit('participant-left', { meetingId, participant });
   }
 
   private cleanupSocket(socket: AuthenticatedSocket): void {
-    const meetingIds = this.socketRooms.get(socket.id);
-    if (!meetingIds || meetingIds.size === 0) return;
+    const meetingIds = this.sessionService.getSocketRooms(socket.id);
+    if (meetingIds.size === 0) return;
 
-    // Snapshot before iterating since removeFromRoom mutates socketRooms during the loop
+    // Snapshot before iterating — removeParticipant mutates the underlying Set
     const snapshot = Array.from(meetingIds);
     for (const meetingId of snapshot) {
       this.removeFromRoomAndBroadcast(meetingId, socket);
     }
   }
 
-  private removeFromRoomAndBroadcast(meetingId: string, socket: AuthenticatedSocket): void {
-    const participant = this.removeFromRoom(meetingId, socket.id);
-    if (!participant) return;
+  /**
+   * Validates raw Socket.IO message data against a DTO class.
+   * Emits a `400` error to the socket on the first failure and returns `null`.
+   */
+  private validateSocketPayload<T extends object>(
+    cls: new () => T,
+    raw: unknown,
+    socket: AuthenticatedSocket,
+  ): T | null {
+    const instance = plainToInstance(cls, raw);
+    const errors: ValidationError[] = validateSync(instance as object, {
+      whitelist: true,
+      forbidNonWhitelisted: false,
+    });
+    if (errors.length > 0) {
+      const firstMessage = Object.values(errors[0].constraints ?? {})[0] ?? 'Invalid payload';
+      this.logger.warn(
+        `event=validation-failed socketId=${socket.id} constraint=${firstMessage} ts=${new Date().toISOString()}`,
+      );
+      socket.emit('error', { code: 400, message: firstMessage });
+      return null;
+    }
+    return instance;
+  }
 
-    void socket.leave(meetingId);
-    this.logger.log(
-      `User left room: meetingId=${meetingId} socketId=${socket.id} userId=${participant.userId}`,
-    );
+  /**
+   * Sliding-window rate limiter for relay events.
+   * Returns `true` if within the allowed limit; emits `429` and returns `false` otherwise.
+   */
+  private checkRateLimit(socket: AuthenticatedSocket): boolean {
+    const now = Date.now();
+    const bucket = this.rateLimits.get(socket.id);
 
-    // Notify video-call participants and lobby watchers
-    this.server
-      .to(meetingId)
-      .to(`watch:${meetingId}`)
-      .emit('participant-left', { meetingId, participant });
+    if (!bucket || now - bucket.windowStart >= RELAY_RATE_WINDOW_MS) {
+      this.rateLimits.set(socket.id, { count: 1, windowStart: now });
+      return true;
+    }
+
+    bucket.count += 1;
+    if (bucket.count > RELAY_RATE_LIMIT) {
+      socket.emit('error', {
+        code: 429,
+        message: 'Rate limit exceeded for signaling events',
+      });
+      return false;
+    }
+
+    return true;
   }
 
   private extractToken(socket: AuthenticatedSocket): string | undefined {
@@ -401,7 +379,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (authToken) return authToken;
 
     const authHeader = socket.handshake.headers?.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
+    if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
       return authHeader.slice(7);
     }
 
