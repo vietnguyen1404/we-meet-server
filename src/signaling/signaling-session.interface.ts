@@ -1,10 +1,15 @@
-import { User } from '@prisma/client';
+import type { User } from '@prisma/client';
 
 export interface ParticipantInfo {
   socketId: string;
   userId: string;
   name: string;
   joinedAt: number;
+}
+
+export interface AddParticipantResult {
+  participant: ParticipantInfo;
+  evictedSocketId?: string;
 }
 
 export const SIGNALING_SESSION_SERVICE = Symbol('SIGNALING_SESSION_SERVICE');
@@ -14,13 +19,11 @@ export interface ISignalingSessionService {
     meetingId: string,
     socketId: string,
     user: Omit<User, 'passwordHash'>,
-  ): ParticipantInfo;
-
-  removeParticipant(meetingId: string, socketId: string): ParticipantInfo | undefined;
-
+  ): AddParticipantResult;
+  removeParticipant(
+    socketId: string,
+  ): { meetingId: string; participant: ParticipantInfo } | undefined;
   getParticipants(meetingId: string): ParticipantInfo[];
-
-  getSocketRooms(socketId: string): Set<string>;
-
+  getMeetingIdBySocket(socketId: string): string | undefined;
   isParticipant(meetingId: string, socketId: string): boolean;
 }

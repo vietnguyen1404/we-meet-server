@@ -4,6 +4,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { SignalingGateway } from './signaling.gateway';
+import { SignalingRateLimiterService } from './signaling-rate-limiter.service';
 import { UsersRepository } from '../users/users.repository';
 import { MeetingsRepository } from '../meetings/meetings.repository';
 import { SIGNALING_SESSION_SERVICE } from './signaling-session.interface';
@@ -79,9 +80,10 @@ describe('SignalingGateway', () => {
     addParticipant: jest.Mock;
     removeParticipant: jest.Mock;
     getParticipants: jest.Mock;
-    getSocketRooms: jest.Mock;
+    getMeetingIdBySocket: jest.Mock;
     isParticipant: jest.Mock;
   };
+  let mockRateLimiter: { check: jest.Mock; clearSocket: jest.Mock };
   let mockServerToChain: { to: jest.Mock; emit: jest.Mock };
 
   beforeEach(async () => {
@@ -92,11 +94,15 @@ describe('SignalingGateway', () => {
     jwtService = { verify: jest.fn() };
     usersRepository = { findById: jest.fn() };
     mockSessionService = {
-      addParticipant: jest.fn().mockReturnValue(fakeParticipant),
+      addParticipant: jest.fn().mockReturnValue({ participant: fakeParticipant }),
       removeParticipant: jest.fn().mockReturnValue(undefined),
       getParticipants: jest.fn().mockReturnValue([]),
-      getSocketRooms: jest.fn().mockReturnValue(new Set<string>()),
+      getMeetingIdBySocket: jest.fn().mockReturnValue(undefined),
       isParticipant: jest.fn().mockReturnValue(false),
+    };
+    mockRateLimiter = {
+      check: jest.fn().mockReturnValue(true),
+      clearSocket: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -106,6 +112,7 @@ describe('SignalingGateway', () => {
         { provide: UsersRepository, useValue: usersRepository },
         { provide: MeetingsRepository, useValue: meetingsRepository },
         { provide: SIGNALING_SESSION_SERVICE, useValue: mockSessionService },
+        { provide: SignalingRateLimiterService, useValue: mockRateLimiter },
       ],
     }).compile();
 
@@ -115,8 +122,9 @@ describe('SignalingGateway', () => {
     const serverEmit = jest.fn();
     mockServerToChain = { to: jest.fn(), emit: serverEmit };
     mockServerToChain.to.mockReturnValue(mockServerToChain);
-    (gateway as unknown as { server: { to: jest.Mock } }).server = {
+    (gateway as unknown as { server: unknown }).server = {
       to: jest.fn().mockReturnValue(mockServerToChain),
+      sockets: { get: jest.fn().mockReturnValue(null) },
     };
   });
 
@@ -138,9 +146,7 @@ describe('SignalingGateway', () => {
 
     it('should disconnect with 401 when no token is provided', async () => {
       const socket = createConnectionSocket();
-
       await gateway.handleConnection(socket);
-
       expect(socket.emit).toHaveBeenCalledWith('error', {
         code: 401,
         message: 'Missing authentication token',
@@ -153,9 +159,7 @@ describe('SignalingGateway', () => {
       jwtService.verify.mockImplementation(() => {
         throw new Error('invalid signature');
       });
-
       await gateway.handleConnection(socket);
-
       expect(socket.emit).toHaveBeenCalledWith('error', {
         code: 401,
         message: 'invalid signature',
@@ -167,9 +171,7 @@ describe('SignalingGateway', () => {
       const socket = createConnectionSocket('valid-token');
       jwtService.verify.mockReturnValue({ userId: 'ghost-user' });
       usersRepository.findById.mockResolvedValue(null);
-
       await gateway.handleConnection(socket);
-
       expect(socket.emit).toHaveBeenCalledWith('error', {
         code: 401,
         message: 'User not found',
@@ -181,9 +183,7 @@ describe('SignalingGateway', () => {
       const socket = createConnectionSocket('valid-token');
       jwtService.verify.mockReturnValue({ userId: 'user-1' });
       usersRepository.findById.mockResolvedValue(fakeUser);
-
       await gateway.handleConnection(socket);
-
       expect(socket.emit).not.toHaveBeenCalled();
       expect(socket.disconnect).not.toHaveBeenCalled();
       const storedUser = socket.data.user as Record<string, unknown>;
@@ -199,9 +199,7 @@ describe('SignalingGateway', () => {
     it('should emit 401 when socket has no user', async () => {
       const socket = createMockSocket();
       socket.data.user = undefined;
-
       await gateway.handleJoinRoom({ meetingId: MEETING_UUID }, socket);
-
       expect(socket.emit).toHaveBeenCalledWith('error', {
         code: 401,
         message: 'Not authenticated',
@@ -211,9 +209,7 @@ describe('SignalingGateway', () => {
     it('should emit 400 when meetingId is not a valid UUID', async () => {
       const socket = createMockSocket();
       socket.data.user = fakeUser as never;
-
       await gateway.handleJoinRoom({ meetingId: 'bad-id' }, socket);
-
       expect(socket.emit).toHaveBeenCalledWith('error', expect.objectContaining({ code: 400 }));
     });
 
@@ -221,9 +217,7 @@ describe('SignalingGateway', () => {
       const socket = createMockSocket();
       socket.data.user = fakeUser as never;
       meetingsRepository.findById.mockResolvedValue(null);
-
       await gateway.handleJoinRoom({ meetingId: MEETING_UUID }, socket);
-
       expect(socket.emit).toHaveBeenCalledWith('error', {
         code: 404,
         message: 'Meeting ' + MEETING_UUID + ' not found',
@@ -235,9 +229,7 @@ describe('SignalingGateway', () => {
       socket.data.user = fakeUser as never;
       meetingsRepository.findById.mockResolvedValue({ id: MEETING_UUID });
       meetingsRepository.findMemberByMeetingAndUser.mockResolvedValue(null);
-
       await gateway.handleJoinRoom({ meetingId: MEETING_UUID }, socket);
-
       expect(socket.emit).toHaveBeenCalledWith('error', {
         code: 403,
         message: 'Not a member of this meeting',
@@ -250,9 +242,7 @@ describe('SignalingGateway', () => {
       meetingsRepository.findById.mockResolvedValue({ id: MEETING_UUID });
       meetingsRepository.findMemberByMeetingAndUser.mockResolvedValue({ id: 'member-1' });
       mockSessionService.isParticipant.mockReturnValue(true);
-
       await gateway.handleJoinRoom({ meetingId: MEETING_UUID }, socket);
-
       expect(socket.join).not.toHaveBeenCalled();
       expect(mockSessionService.addParticipant).not.toHaveBeenCalled();
     });
@@ -263,7 +253,7 @@ describe('SignalingGateway', () => {
       meetingsRepository.findById.mockResolvedValue({ id: MEETING_UUID });
       meetingsRepository.findMemberByMeetingAndUser.mockResolvedValue({ id: 'member-1' });
       mockSessionService.isParticipant.mockReturnValue(false);
-      mockSessionService.addParticipant.mockReturnValue(fakeParticipant);
+      mockSessionService.addParticipant.mockReturnValue({ participant: fakeParticipant });
       mockSessionService.getParticipants.mockReturnValue([fakeParticipant]);
 
       await gateway.handleJoinRoom({ meetingId: MEETING_UUID }, socket);
@@ -298,9 +288,7 @@ describe('SignalingGateway', () => {
     it('should emit 401 when socket has no user', () => {
       const socket = createMockSocket();
       socket.data.user = undefined;
-
       gateway.handleLeaveRoom({ meetingId: MEETING_UUID }, socket);
-
       expect(socket.emit).toHaveBeenCalledWith('error', {
         code: 401,
         message: 'Not authenticated',
@@ -310,26 +298,27 @@ describe('SignalingGateway', () => {
     it('should emit 400 when meetingId is not a valid UUID', () => {
       const socket = createMockSocket();
       socket.data.user = fakeUser as never;
-
       gateway.handleLeaveRoom({ meetingId: 'bad-id' }, socket);
-
       expect(socket.emit).toHaveBeenCalledWith('error', expect.objectContaining({ code: 400 }));
     });
 
     it('should do nothing if socket is not in the room', () => {
       const socket = createMockSocket();
       socket.data.user = fakeUser as never;
-      mockSessionService.removeParticipant.mockReturnValue(undefined);
-
+      mockSessionService.isParticipant.mockReturnValue(false);
       gateway.handleLeaveRoom({ meetingId: MEETING_UUID }, socket);
-
       expect(socket.leave).not.toHaveBeenCalled();
+      expect(mockSessionService.removeParticipant).not.toHaveBeenCalled();
     });
 
     it('should leave room and broadcast participant-left', () => {
       const socket = createMockSocket();
       socket.data.user = fakeUser as never;
-      mockSessionService.removeParticipant.mockReturnValue(fakeParticipant);
+      mockSessionService.isParticipant.mockReturnValue(true);
+      mockSessionService.removeParticipant.mockReturnValue({
+        meetingId: MEETING_UUID,
+        participant: fakeParticipant,
+      });
 
       const mockServer = gateway as unknown as { server: { to: jest.Mock } };
       mockServer.server.to.mockReturnValue(mockServerToChain);
@@ -354,9 +343,7 @@ describe('SignalingGateway', () => {
     it('should emit 401 when socket has no user', async () => {
       const socket = createMockSocket();
       socket.data.user = undefined;
-
       await gateway.handleWatchMeeting({ meetingId: MEETING_UUID }, socket);
-
       expect(socket.emit).toHaveBeenCalledWith('error', {
         code: 401,
         message: 'Not authenticated',
@@ -366,9 +353,7 @@ describe('SignalingGateway', () => {
     it('should emit 400 when meetingId is not a valid UUID', async () => {
       const socket = createMockSocket();
       socket.data.user = fakeUser as never;
-
       await gateway.handleWatchMeeting({ meetingId: 'not-a-uuid' }, socket);
-
       expect(socket.emit).toHaveBeenCalledWith('error', expect.objectContaining({ code: 400 }));
     });
 
@@ -376,9 +361,7 @@ describe('SignalingGateway', () => {
       const socket = createMockSocket();
       socket.data.user = fakeUser as never;
       meetingsRepository.findById.mockResolvedValue(null);
-
       await gateway.handleWatchMeeting({ meetingId: MEETING_UUID }, socket);
-
       expect(socket.emit).toHaveBeenCalledWith('error', {
         code: 404,
         message: 'Meeting ' + MEETING_UUID + ' not found',
@@ -390,9 +373,7 @@ describe('SignalingGateway', () => {
       socket.data.user = fakeUser as never;
       meetingsRepository.findById.mockResolvedValue({ id: MEETING_UUID });
       meetingsRepository.findMemberByMeetingAndUser.mockResolvedValue(null);
-
       await gateway.handleWatchMeeting({ meetingId: MEETING_UUID }, socket);
-
       expect(socket.emit).toHaveBeenCalledWith('error', {
         code: 403,
         message: 'Not a member of this meeting',
@@ -405,9 +386,7 @@ describe('SignalingGateway', () => {
       meetingsRepository.findById.mockResolvedValue({ id: MEETING_UUID });
       meetingsRepository.findMemberByMeetingAndUser.mockResolvedValue({ id: 'member-1' });
       mockSessionService.getParticipants.mockReturnValue([fakeParticipant]);
-
       await gateway.handleWatchMeeting({ meetingId: MEETING_UUID }, socket);
-
       expect(socket.join).toHaveBeenCalledWith('watch:' + MEETING_UUID);
       expect(socket.emit).toHaveBeenCalledWith('participants-list', {
         meetingId: MEETING_UUID,
@@ -419,7 +398,7 @@ describe('SignalingGateway', () => {
   // ── WebRTC relay: offer / answer / ice-candidate ───────────────────────
 
   describe('handleOffer / handleAnswer / handleIceCandidate', () => {
-    const relayPayload = { sdp: 'REDACTED' };
+    const relayPayload = { sdp: 'v=0' };
 
     function setupBothParticipants() {
       mockSessionService.isParticipant.mockReturnValueOnce(true).mockReturnValueOnce(true);
@@ -429,15 +408,12 @@ describe('SignalingGateway', () => {
       const sender = createMockSocket({ id: 'socket-1' });
       sender.data.user = fakeUser as never;
       setupBothParticipants();
-
       const mockServer = gateway as unknown as { server: { to: jest.Mock } };
       mockServer.server.to.mockReturnValue(mockServerToChain);
-
       gateway.handleOffer(
         { meetingId: MEETING_UUID, targetSocketId: TARGET_SOCKET_ID, payload: relayPayload },
         sender,
       );
-
       expect(mockServer.server.to).toHaveBeenCalledWith(TARGET_SOCKET_ID);
       expect(mockServerToChain.emit).toHaveBeenCalledWith('offer', {
         fromSocketId: 'socket-1',
@@ -449,15 +425,12 @@ describe('SignalingGateway', () => {
       const sender = createMockSocket({ id: 'socket-1' });
       sender.data.user = fakeUser as never;
       setupBothParticipants();
-
       const mockServer = gateway as unknown as { server: { to: jest.Mock } };
       mockServer.server.to.mockReturnValue(mockServerToChain);
-
       gateway.handleAnswer(
         { meetingId: MEETING_UUID, targetSocketId: TARGET_SOCKET_ID, payload: { sdp: 'answer' } },
         sender,
       );
-
       expect(mockServerToChain.emit).toHaveBeenCalledWith(
         'answer',
         expect.objectContaining({ fromSocketId: 'socket-1' }),
@@ -468,15 +441,12 @@ describe('SignalingGateway', () => {
       const sender = createMockSocket({ id: 'socket-1' });
       sender.data.user = fakeUser as never;
       setupBothParticipants();
-
       const mockServer = gateway as unknown as { server: { to: jest.Mock } };
       mockServer.server.to.mockReturnValue(mockServerToChain);
-
       gateway.handleIceCandidate(
         { meetingId: MEETING_UUID, targetSocketId: TARGET_SOCKET_ID, payload: { candidate: 'x' } },
         sender,
       );
-
       expect(mockServerToChain.emit).toHaveBeenCalledWith(
         'ice-candidate',
         expect.objectContaining({ fromSocketId: 'socket-1' }),
@@ -486,12 +456,10 @@ describe('SignalingGateway', () => {
     it('should emit 401 when sender is not authenticated', () => {
       const socket = createMockSocket();
       socket.data.user = undefined;
-
       gateway.handleOffer(
         { meetingId: MEETING_UUID, targetSocketId: TARGET_SOCKET_ID, payload: {} },
         socket,
       );
-
       expect(socket.emit).toHaveBeenCalledWith('error', {
         code: 401,
         message: 'Not authenticated',
@@ -501,21 +469,17 @@ describe('SignalingGateway', () => {
     it('should emit 400 when meetingId is not a valid UUID', () => {
       const socket = createMockSocket();
       socket.data.user = fakeUser as never;
-
       gateway.handleOffer(
         { meetingId: 'not-a-uuid', targetSocketId: TARGET_SOCKET_ID, payload: {} },
         socket,
       );
-
       expect(socket.emit).toHaveBeenCalledWith('error', expect.objectContaining({ code: 400 }));
     });
 
     it('should emit 400 when targetSocketId is empty', () => {
       const socket = createMockSocket();
       socket.data.user = fakeUser as never;
-
       gateway.handleOffer({ meetingId: MEETING_UUID, targetSocketId: '', payload: {} }, socket);
-
       expect(socket.emit).toHaveBeenCalledWith('error', expect.objectContaining({ code: 400 }));
     });
 
@@ -523,12 +487,10 @@ describe('SignalingGateway', () => {
       const socket = createMockSocket({ id: 'socket-not-in-room' });
       socket.data.user = fakeUser as never;
       mockSessionService.isParticipant.mockReturnValue(false);
-
       gateway.handleOffer(
         { meetingId: MEETING_UUID, targetSocketId: TARGET_SOCKET_ID, payload: {} },
         socket,
       );
-
       expect(socket.emit).toHaveBeenCalledWith('error', {
         code: 403,
         message: 'You are not in this room',
@@ -539,42 +501,27 @@ describe('SignalingGateway', () => {
       const socket = createMockSocket({ id: 'socket-1' });
       socket.data.user = fakeUser as never;
       mockSessionService.isParticipant.mockReturnValueOnce(true).mockReturnValueOnce(false);
-
       gateway.handleOffer(
         { meetingId: MEETING_UUID, targetSocketId: 'unknown-target', payload: {} },
         socket,
       );
-
       expect(socket.emit).toHaveBeenCalledWith('error', {
         code: 404,
         message: 'Target socket is not in this room',
       });
     });
 
-    it('should emit 429 when rate limit is exceeded (>30 per window)', () => {
+    it('should emit 429 when rate limiter blocks the event', () => {
       const socket = createMockSocket({ id: 'socket-rl' });
       socket.data.user = fakeUser as never;
-      mockSessionService.isParticipant.mockReturnValue(true);
-
-      const mockServer = gateway as unknown as { server: { to: jest.Mock } };
-      mockServer.server.to.mockReturnValue(mockServerToChain);
-
-      for (let i = 0; i < 30; i++) {
-        gateway.handleOffer(
-          { meetingId: MEETING_UUID, targetSocketId: TARGET_SOCKET_ID, payload: {} },
-          socket,
-        );
-      }
-
-      (socket.emit as jest.Mock).mockClear();
+      mockRateLimiter.check.mockReturnValue(false);
       gateway.handleOffer(
         { meetingId: MEETING_UUID, targetSocketId: TARGET_SOCKET_ID, payload: {} },
         socket,
       );
-
       expect(socket.emit).toHaveBeenCalledWith('error', {
         code: 429,
-        message: 'Rate limit exceeded for signaling events',
+        message: 'Too many signaling events',
       });
     });
   });
@@ -584,38 +531,42 @@ describe('SignalingGateway', () => {
   describe('handleDisconnect', () => {
     it('should produce no broadcasts when socket was in no rooms', () => {
       const socket = createMockSocket();
-      mockSessionService.getSocketRooms.mockReturnValue(new Set<string>());
+      mockSessionService.removeParticipant.mockReturnValue(undefined);
 
       gateway.handleDisconnect(socket);
 
       expect(mockServerToChain.emit).not.toHaveBeenCalled();
     });
 
-    it('should clean up all rooms the socket was registered in', () => {
+    it('should clean up the room the socket was registered in', () => {
       const socket = createMockSocket({ id: 'socket-1' });
       socket.data.user = fakeUser as never;
-      mockSessionService.getSocketRooms.mockReturnValue(
-        new Set<string>([MEETING_UUID, MEETING_UUID_2]),
-      );
-      mockSessionService.removeParticipant
-        .mockReturnValueOnce({ ...fakeParticipant, socketId: 'socket-1' })
-        .mockReturnValueOnce({ ...fakeParticipant2, socketId: 'socket-1' });
+      mockSessionService.removeParticipant.mockReturnValue({
+        meetingId: MEETING_UUID,
+        participant: fakeParticipant,
+      });
 
       const mockServer = gateway as unknown as { server: { to: jest.Mock } };
       mockServer.server.to.mockReturnValue(mockServerToChain);
 
       gateway.handleDisconnect(socket);
 
-      expect(mockSessionService.removeParticipant).toHaveBeenCalledTimes(2);
-      expect(mockServerToChain.emit).toHaveBeenCalledTimes(2);
+      expect(mockSessionService.removeParticipant).toHaveBeenCalledTimes(1);
+      expect(mockSessionService.removeParticipant).toHaveBeenCalledWith('socket-1');
+      expect(mockServerToChain.emit).toHaveBeenCalledTimes(1);
       expect(mockServerToChain.emit).toHaveBeenCalledWith(
         'participant-left',
         expect.objectContaining({ meetingId: MEETING_UUID }),
       );
-      expect(mockServerToChain.emit).toHaveBeenCalledWith(
-        'participant-left',
-        expect.objectContaining({ meetingId: MEETING_UUID_2 }),
-      );
+    });
+
+    it('should call rateLimiter.clearSocket on disconnect', () => {
+      const socket = createMockSocket({ id: 'socket-rl' });
+      socket.data.user = fakeUser as never;
+
+      gateway.handleDisconnect(socket);
+
+      expect(mockRateLimiter.clearSocket).toHaveBeenCalledWith('socket-rl');
     });
 
     it('should not throw after a rate-limited socket disconnects', () => {
