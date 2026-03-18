@@ -59,6 +59,7 @@ const fakeParticipant: ParticipantInfo = {
   socketId: 'socket-1',
   userId: 'user-1',
   name: 'Alice',
+  isHost: true,
   joinedAt: 0,
 };
 
@@ -66,6 +67,7 @@ const fakeParticipant2: ParticipantInfo = {
   socketId: 'socket-2',
   userId: 'user-2',
   name: 'Bob',
+  isHost: false,
   joinedAt: 0,
 };
 
@@ -73,7 +75,7 @@ const fakeParticipant2: ParticipantInfo = {
 
 describe('SignalingGateway', () => {
   let gateway: SignalingGateway;
-  let meetingsRepository: { findById: jest.Mock; findMemberByMeetingAndUser: jest.Mock };
+  let meetingsRepository: { findById: jest.Mock };
   let jwtService: { verify: jest.Mock };
   let usersRepository: { findById: jest.Mock };
   let mockSessionService: {
@@ -89,7 +91,6 @@ describe('SignalingGateway', () => {
   beforeEach(async () => {
     meetingsRepository = {
       findById: jest.fn(),
-      findMemberByMeetingAndUser: jest.fn(),
     };
     jwtService = { verify: jest.fn() };
     usersRepository = { findById: jest.fn() };
@@ -224,25 +225,12 @@ describe('SignalingGateway', () => {
       });
     });
 
-    it('should emit 403 when user is not a member', async () => {
-      const socket = createMockSocket();
-      socket.data.user = fakeUser as never;
-      meetingsRepository.findById.mockResolvedValue({ id: MEETING_UUID });
-      meetingsRepository.findMemberByMeetingAndUser.mockResolvedValue(null);
-      await gateway.handleJoinRoom({ meetingId: MEETING_UUID }, socket);
-      expect(socket.emit).toHaveBeenCalledWith('error', {
-        code: 403,
-        message: 'Not a member of this meeting',
-      });
-    });
-
     it('should be a no-op when socket is already in the room', async () => {
       const socket = createMockSocket();
       socket.data.user = fakeUser as never;
-      meetingsRepository.findById.mockResolvedValue({ id: MEETING_UUID });
-      meetingsRepository.findMemberByMeetingAndUser.mockResolvedValue({ id: 'member-1' });
       mockSessionService.isParticipant.mockReturnValue(true);
       await gateway.handleJoinRoom({ meetingId: MEETING_UUID }, socket);
+      expect(meetingsRepository.findById).not.toHaveBeenCalled();
       expect(socket.join).not.toHaveBeenCalled();
       expect(mockSessionService.addParticipant).not.toHaveBeenCalled();
     });
@@ -250,8 +238,7 @@ describe('SignalingGateway', () => {
     it('should join room, call addParticipant, broadcast, and emit participants-list', async () => {
       const socket = createMockSocket();
       socket.data.user = fakeUser as never;
-      meetingsRepository.findById.mockResolvedValue({ id: MEETING_UUID });
-      meetingsRepository.findMemberByMeetingAndUser.mockResolvedValue({ id: 'member-1' });
+      meetingsRepository.findById.mockResolvedValue({ id: MEETING_UUID, hostId: 'user-1' });
       mockSessionService.isParticipant.mockReturnValue(false);
       mockSessionService.addParticipant.mockReturnValue({ participant: fakeParticipant });
       mockSessionService.getParticipants.mockReturnValue([fakeParticipant]);
@@ -263,13 +250,14 @@ describe('SignalingGateway', () => {
         MEETING_UUID,
         'socket-1',
         expect.objectContaining({ id: 'user-1' }),
+        true,
       );
       expect(socket.to).toHaveBeenCalledWith(MEETING_UUID);
       expect(socket._broadcast.emit).toHaveBeenCalledWith(
         'participant-joined',
         expect.objectContaining({
           meetingId: MEETING_UUID,
-          participant: expect.objectContaining({ userId: 'user-1', name: 'Alice' }),
+          participant: expect.objectContaining({ userId: 'user-1', name: 'Alice', isHost: true }),
         }),
       );
       expect(socket.emit).toHaveBeenCalledWith(
@@ -368,23 +356,10 @@ describe('SignalingGateway', () => {
       });
     });
 
-    it('should emit 403 when user is not a member of the meeting', async () => {
-      const socket = createMockSocket();
-      socket.data.user = fakeUser as never;
-      meetingsRepository.findById.mockResolvedValue({ id: MEETING_UUID });
-      meetingsRepository.findMemberByMeetingAndUser.mockResolvedValue(null);
-      await gateway.handleWatchMeeting({ meetingId: MEETING_UUID }, socket);
-      expect(socket.emit).toHaveBeenCalledWith('error', {
-        code: 403,
-        message: 'Not a member of this meeting',
-      });
-    });
-
     it('should join watch room and emit current participants-list on success', async () => {
       const socket = createMockSocket();
       socket.data.user = fakeUser as never;
-      meetingsRepository.findById.mockResolvedValue({ id: MEETING_UUID });
-      meetingsRepository.findMemberByMeetingAndUser.mockResolvedValue({ id: 'member-1' });
+      meetingsRepository.findById.mockResolvedValue({ id: MEETING_UUID, hostId: 'user-1' });
       mockSessionService.getParticipants.mockReturnValue([fakeParticipant]);
       await gateway.handleWatchMeeting({ meetingId: MEETING_UUID }, socket);
       expect(socket.join).toHaveBeenCalledWith('watch:' + MEETING_UUID);

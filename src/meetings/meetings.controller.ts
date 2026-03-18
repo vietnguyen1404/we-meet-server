@@ -28,15 +28,6 @@ export class MeetingsController {
     return this.meetingsService.createMeeting(userId, createMeetingDto);
   }
 
-  @Post(':id/join')
-  @HttpCode(HttpStatus.OK)
-  async joinMeeting(
-    @CurrentUser('id') userId: string,
-    @Param('id') meetingId: string,
-  ): Promise<MeetingResponseDto> {
-    return this.meetingsService.joinMeeting(userId, meetingId);
-  }
-
   @Get(':id')
   @HttpCode(HttpStatus.OK)
   async getMeetingDetails(@Param('id') meetingId: string): Promise<MeetingResponseDto> {

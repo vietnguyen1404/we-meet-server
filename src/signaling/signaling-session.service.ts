@@ -15,6 +15,7 @@ export class SignalingSessionService implements ISignalingSessionService {
     meetingId: string,
     socketId: string,
     user: Omit<User, 'passwordHash'>,
+    isHost: boolean,
   ): AddParticipantResult {
     if (!this.rooms.has(meetingId)) {
       this.rooms.set(meetingId, new Map());
@@ -35,6 +36,7 @@ export class SignalingSessionService implements ISignalingSessionService {
       socketId,
       userId: user.id,
       name: user.name ?? 'Anonymous',
+      isHost,
       joinedAt: Date.now(),
     };
     room.set(socketId, participant);
