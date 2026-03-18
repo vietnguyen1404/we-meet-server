@@ -139,20 +139,8 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     const { meetingId } = dto;
 
-    const meeting = await this.meetingsRepository.findById(meetingId);
-    if (!meeting) {
-      socket.emit('error', { code: 404, message: `Meeting ${meetingId} not found` });
-      return;
-    }
-
-    const membership = await this.meetingsRepository.findMemberByMeetingAndUser(
-      meetingId,
-      socket.data.user.id,
-    );
-    if (!membership) {
-      socket.emit('error', { code: 403, message: 'Not a member of this meeting' });
-      return;
-    }
+    const meeting = await this.resolveAndValidateMeeting(meetingId, socket);
+    if (!meeting) return;
 
     await socket.join(`watch:${meetingId}`);
     this.logger.log(
@@ -181,26 +169,20 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     const { meetingId } = dto;
 
-    const meeting = await this.meetingsRepository.findById(meetingId);
-    if (!meeting) {
-      socket.emit('error', { code: 404, message: `Meeting ${meetingId} not found` });
-      return;
-    }
-
-    const membership = await this.meetingsRepository.findMemberByMeetingAndUser(meetingId, user.id);
-    if (!membership) {
-      socket.emit('error', { code: 403, message: 'Not a member of this meeting' });
-      return;
-    }
-
     // No-op if already present — prevents duplicate participant-joined broadcasts
     if (this.sessionService.isParticipant(meetingId, socket.id)) return;
+
+    const meeting = await this.canJoinMeeting(meetingId, user, socket);
+    if (!meeting) return;
+
+    const isHost = user.id === meeting.hostId;
 
     await socket.join(meetingId);
     const { participant, evictedSocketId } = this.sessionService.addParticipant(
       meetingId,
       socket.id,
       user,
+      isHost,
     );
 
     if (evictedSocketId) {
@@ -319,6 +301,53 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   private cleanupSocket(socket: AuthenticatedSocket): void {
     this.removeFromRoomAndBroadcast(socket);
+  }
+
+  // ── Join-gating ────────────────────────────────────────────────────────
+  // These two methods form the single extension point for future join-flow
+  // changes (e.g. request-join / host-approval). All meeting-existence and
+  // authorization checks are funnelled through here so the handler methods
+  // stay thin.
+
+  /**
+   * Resolve a meeting by ID and emit a 404 error on the socket if it does
+   * not exist. Used by both `handleWatchMeeting` and `canJoinMeeting`.
+   */
+  private async resolveAndValidateMeeting(
+    meetingId: string,
+    socket: AuthenticatedSocket,
+  ): Promise<Awaited<ReturnType<MeetingsRepository['findById']>> | null> {
+    const meeting = await this.meetingsRepository.findById(meetingId);
+    if (!meeting) {
+      socket.emit('error', { code: 404, message: `Meeting ${meetingId} not found` });
+      return null;
+    }
+    return meeting;
+  }
+
+  /**
+   * Determine whether a user is allowed to enter the active call.
+   *
+   * Currently any authenticated user with a valid meeting ID may join
+   * (stateless, Google Meet–style). To add an approval gate in the future,
+   * insert the check here — for example:
+   *
+   * ```ts
+   * if (await this.joinApprovalService.isPending(meetingId, user.id)) {
+   *   socket.emit('error', { code: 403, message: 'Waiting for host approval' });
+   *   return null;
+   * }
+   * ```
+   *
+   * @returns The meeting record when join is permitted, or `null` if the
+   *          request was rejected (error already emitted to the socket).
+   */
+  private async canJoinMeeting(
+    meetingId: string,
+    _user: Omit<User, 'passwordHash'>,
+    socket: AuthenticatedSocket,
+  ): Promise<Awaited<ReturnType<MeetingsRepository['findById']>> | null> {
+    return this.resolveAndValidateMeeting(meetingId, socket);
   }
 
   private validateSocketPayload<T extends object>(

@@ -34,46 +34,57 @@ describe('SignalingSessionService', () => {
 
   describe('addParticipant', () => {
     it('should return a result with correct ParticipantInfo fields', () => {
-      const { participant } = service.addParticipant(MEETING_UUID, 'socket-1', fakeUser);
+      const { participant } = service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, true);
 
       expect(participant.socketId).toBe('socket-1');
       expect(participant.userId).toBe('user-1');
       expect(participant.name).toBe('Alice');
+      expect(participant.isHost).toBe(true);
       expect(typeof participant.joinedAt).toBe('number');
     });
 
     it('should return no evictedSocketId on fresh join', () => {
-      const { evictedSocketId } = service.addParticipant(MEETING_UUID, 'socket-1', fakeUser);
+      const { evictedSocketId } = service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, false);
       expect(evictedSocketId).toBeUndefined();
     });
 
     it('should make isParticipant return true after adding', () => {
-      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser);
+      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, false);
       expect(service.isParticipant(MEETING_UUID, 'socket-1')).toBe(true);
     });
 
     it('should register the meeting in getMeetingIdBySocket for the socket', () => {
-      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser);
+      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, false);
       expect(service.getMeetingIdBySocket('socket-1')).toBe(MEETING_UUID);
     });
 
     it('should track multiple sockets in the same room independently', () => {
-      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser);
-      service.addParticipant(MEETING_UUID, 'socket-2', fakeUser2);
+      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, true);
+      service.addParticipant(MEETING_UUID, 'socket-2', fakeUser2, false);
 
       expect(service.isParticipant(MEETING_UUID, 'socket-1')).toBe(true);
       expect(service.isParticipant(MEETING_UUID, 'socket-2')).toBe(true);
     });
 
     it('should evict the old socket when the same userId joins with a new socket', () => {
-      service.addParticipant(MEETING_UUID, 'socket-old', fakeUser);
-      const { evictedSocketId } = service.addParticipant(MEETING_UUID, 'socket-new', fakeUser);
+      service.addParticipant(MEETING_UUID, 'socket-old', fakeUser, true);
+      const { evictedSocketId } = service.addParticipant(
+        MEETING_UUID,
+        'socket-new',
+        fakeUser,
+        true,
+      );
 
       expect(evictedSocketId).toBe('socket-old');
       expect(service.isParticipant(MEETING_UUID, 'socket-old')).toBe(false);
       expect(service.isParticipant(MEETING_UUID, 'socket-new')).toBe(true);
       expect(service.getMeetingIdBySocket('socket-old')).toBeUndefined();
       expect(service.getMeetingIdBySocket('socket-new')).toBe(MEETING_UUID);
+    });
+
+    it('should correctly set isHost=false for non-host participant', () => {
+      const { participant } = service.addParticipant(MEETING_UUID, 'socket-2', fakeUser2, false);
+      expect(participant.isHost).toBe(false);
     });
   });
 
@@ -86,7 +97,7 @@ describe('SignalingSessionService', () => {
     });
 
     it('should return { meetingId, participant } on successful removal', () => {
-      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser);
+      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, false);
       const result = service.removeParticipant('socket-1');
 
       expect(result).toBeDefined();
@@ -96,29 +107,29 @@ describe('SignalingSessionService', () => {
     });
 
     it('should make isParticipant return false after removing', () => {
-      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser);
+      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, false);
       service.removeParticipant('socket-1');
 
       expect(service.isParticipant(MEETING_UUID, 'socket-1')).toBe(false);
     });
 
     it('should clean up the room entry when the last participant leaves', () => {
-      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser);
+      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, false);
       service.removeParticipant('socket-1');
 
       expect(service.getParticipants(MEETING_UUID)).toEqual([]);
     });
 
     it('should clear getMeetingIdBySocket after removal', () => {
-      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser);
+      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, false);
       service.removeParticipant('socket-1');
 
       expect(service.getMeetingIdBySocket('socket-1')).toBeUndefined();
     });
 
     it('should not remove other participants when one leaves', () => {
-      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser);
-      service.addParticipant(MEETING_UUID, 'socket-2', fakeUser2);
+      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, true);
+      service.addParticipant(MEETING_UUID, 'socket-2', fakeUser2, false);
       service.removeParticipant('socket-1');
 
       expect(service.isParticipant(MEETING_UUID, 'socket-2')).toBe(true);
@@ -133,8 +144,8 @@ describe('SignalingSessionService', () => {
     });
 
     it('should return the correct participants after adding', () => {
-      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser);
-      service.addParticipant(MEETING_UUID, 'socket-2', fakeUser2);
+      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, true);
+      service.addParticipant(MEETING_UUID, 'socket-2', fakeUser2, false);
 
       const participants = service.getParticipants(MEETING_UUID);
 
@@ -153,7 +164,7 @@ describe('SignalingSessionService', () => {
     });
 
     it('should return the meeting id after joining', () => {
-      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser);
+      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, false);
       expect(service.getMeetingIdBySocket('socket-1')).toBe(MEETING_UUID);
     });
   });
@@ -166,7 +177,7 @@ describe('SignalingSessionService', () => {
     });
 
     it('should return false for a socket not in the room', () => {
-      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser);
+      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, false);
       expect(service.isParticipant(MEETING_UUID, 'socket-99')).toBe(false);
     });
   });

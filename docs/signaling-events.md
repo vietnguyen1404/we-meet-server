@@ -2,6 +2,38 @@
 
 Documentation for the Socket.IO signaling gateway.
 
+---
+
+## Client Flow (Google Meet–style)
+
+The backend is designed around a **pre-join / in-call** separation, similar to Google Meet:
+
+1. **User opens `/meet/:id`** — The client calls `GET /meetings/:id` to fetch meeting metadata (title, hostId). The user is **not** a participant yet; no WebSocket connection is needed at this stage.
+
+2. **Pre-join screen** — The client renders a lobby UI (camera/mic preview, display name, etc.). Optionally, the client may emit `watch-meeting` to observe the current participant list without entering the call.
+
+3. **User clicks "Join"** — The client establishes a WebSocket connection (if not already connected) and emits `join-room`. **Only after the server processes `join-room` does the user become an active participant.**
+
+4. **In-call** — The user is now tracked in-memory by `SignalingSessionService`. WebRTC negotiation (`offer`, `answer`, `ice-candidate`) is available. Presence updates (`participant-joined`, `participant-left`) are broadcast to the call room and any lobby watchers.
+
+5. **User leaves** — Either explicitly via `leave-room`, or implicitly via disconnect. The server removes the participant from memory and broadcasts `participant-left`.
+
+> **Key principle:** Presence is **ephemeral**. It exists only after `join-room` and is cleared on `leave-room` or disconnect. There is no persistent participant table in the database.
+
+---
+
+## Future Extensibility: Request-Join / Approval Flow
+
+The `join-room` handler delegates to an internal `canJoinMeeting()` method. This is the **single extension point** for adding join-gating logic in a future phase:
+
+- A `request-join` client event (reserved, **not yet implemented**) will allow a user to signal intent to join.
+- The host can approve or deny the request.
+- `canJoinMeeting()` will then check approval status before allowing the user into the call.
+
+No client changes are required until this flow is implemented.
+
+---
+
 ## Connection
 
 The gateway is available on the default Socket.IO namespace (`/`). Clients must authenticate at the handshake layer — **no messages are processed from unauthenticated sockets.**
@@ -63,11 +95,11 @@ Authenticated clients can join meeting rooms, watch the lobby, and receive prese
 
 ### Client → Server Events
 
-| Event           | Payload                 | Description                                                                                       |
-| --------------- | ----------------------- | ------------------------------------------------------------------------------------------------- |
-| `join-room`     | `{ meetingId: string }` | Join a meeting room. Server validates meeting existence and membership.                           |
-| `leave-room`    | `{ meetingId: string }` | Leave a meeting room. Server removes the socket and broadcasts departure.                         |
-| `watch-meeting` | `{ meetingId: string }` | Join the lobby watcher room (`watch:{meetingId}`). Receives current participant list immediately. |
+| Event           | Payload                 | Description                                                                                                                                                                                   |
+| --------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `join-room`     | `{ meetingId: string }` | Join the **active call** (in-call state). Server validates meeting existence via `canJoinMeeting()`. Any authenticated user may join. This is the only event that makes a user a participant. |
+| `leave-room`    | `{ meetingId: string }` | Leave the active call. Server removes the socket from the participant store and broadcasts departure.                                                                                         |
+| `watch-meeting` | `{ meetingId: string }` | **Optional lobby observer.** Joins the `watch:{meetingId}` room to receive the current participant list and live join/leave updates, without entering the call.                               |
 
 ### Server → Client Events
 
@@ -85,18 +117,18 @@ interface ParticipantInfo {
   userId: string;
   name: string;
   socketId: string;
+  isHost: boolean;
   joinedAt: Date;
 }
 ```
 
 ### Error Codes
 
-| Code  | Meaning                     |
-| ----- | --------------------------- |
-| `400` | Invalid or missing payload  |
-| `401` | Not authenticated           |
-| `403` | Not a member of the meeting |
-| `404` | Meeting not found           |
+| Code  | Meaning                    |
+| ----- | -------------------------- |
+| `400` | Invalid or missing payload |
+| `401` | Not authenticated          |
+| `404` | Meeting not found          |
 
 ### Example: Joining a Room
 
@@ -146,6 +178,7 @@ socket.on('participant-left', ({ participant }) => {
 
 ### Presence State
 
+- **Presence is ephemeral** — it only exists after `join-room` and is removed on `leave-room` or disconnect. There is no persistent participant table.
 - Presence is managed by `SignalingSessionService` — an injectable service with a typed interface designed to support Redis-backed adapters in a future phase.
 - When a socket disconnects (abruptly or gracefully), the server removes it from all rooms and broadcasts `participant-left` to both the call room and the `watch:{meetingId}` lobby.
 - When the last participant leaves, the meeting entry is cleared from the in-memory maps. The lobby room persists independently.
@@ -219,3 +252,4 @@ socket.on('offer', ({ fromSocketId, payload }) => {
 ## Out of Scope
 
 - Distributed presence (Redis adapter) — the `ISignalingSessionService` interface is designed to support this without gateway changes.
+- `request-join` / host-approval flow — the `canJoinMeeting()` extension point is in place; implementation is deferred to a future phase.

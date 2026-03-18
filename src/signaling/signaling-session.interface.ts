@@ -4,6 +4,7 @@ export interface ParticipantInfo {
   socketId: string;
   userId: string;
   name: string;
+  isHost: boolean;
   joinedAt: number;
 }
 
@@ -19,6 +20,7 @@ export interface ISignalingSessionService {
     meetingId: string,
     socketId: string,
     user: Omit<User, 'passwordHash'>,
+    isHost: boolean,
   ): AddParticipantResult;
   removeParticipant(
     socketId: string,
