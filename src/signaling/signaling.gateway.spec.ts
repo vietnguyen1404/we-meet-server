@@ -13,7 +13,6 @@ import type { ParticipantInfo } from './signaling-session.interface';
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const MEETING_UUID = '11111111-1111-4111-a111-111111111111';
-const MEETING_UUID_2 = '22222222-2222-4222-a222-222222222222';
 const TARGET_SOCKET_ID = 'socket-target';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -61,17 +60,9 @@ const fakeParticipant: ParticipantInfo = {
   name: 'Alice',
   isHost: true,
   joinedAt: 0,
+  isVideoEnabled: false,
+  isAudioEnabled: false,
 };
-
-const fakeParticipant2: ParticipantInfo = {
-  socketId: 'socket-2',
-  userId: 'user-2',
-  name: 'Bob',
-  isHost: false,
-  joinedAt: 0,
-};
-
-// ── Test suite ─────────────────────────────────────────────────────────────
 
 describe('SignalingGateway', () => {
   let gateway: SignalingGateway;
@@ -84,6 +75,7 @@ describe('SignalingGateway', () => {
     getParticipants: jest.Mock;
     getMeetingIdBySocket: jest.Mock;
     isParticipant: jest.Mock;
+    updateMediaState: jest.Mock;
   };
   let mockRateLimiter: { check: jest.Mock; clearSocket: jest.Mock };
   let mockServerToChain: { to: jest.Mock; emit: jest.Mock };
@@ -100,6 +92,7 @@ describe('SignalingGateway', () => {
       getParticipants: jest.fn().mockReturnValue([]),
       getMeetingIdBySocket: jest.fn().mockReturnValue(undefined),
       isParticipant: jest.fn().mockReturnValue(false),
+      updateMediaState: jest.fn().mockReturnValue(undefined),
     };
     mockRateLimiter = {
       check: jest.fn().mockReturnValue(true),
@@ -497,6 +490,91 @@ describe('SignalingGateway', () => {
       expect(socket.emit).toHaveBeenCalledWith('error', {
         code: 429,
         message: 'Too many signaling events',
+      });
+    });
+  });
+
+  // ── participant-media-state ────────────────────────────────────────────
+
+  describe('handleParticipantMediaState', () => {
+    it('should emit 401 when socket has no user', () => {
+      const socket = createMockSocket();
+      socket.data.user = undefined;
+      gateway.handleParticipantMediaState(
+        { meetingId: MEETING_UUID, video: true, audio: false },
+        socket,
+      );
+      expect(socket.emit).toHaveBeenCalledWith('error', {
+        code: 401,
+        message: 'Not authenticated',
+      });
+    });
+
+    it('should emit 400 when meetingId is not a valid UUID', () => {
+      const socket = createMockSocket();
+      socket.data.user = fakeUser as never;
+      gateway.handleParticipantMediaState(
+        { meetingId: 'not-a-uuid', video: true, audio: false },
+        socket,
+      );
+      expect(socket.emit).toHaveBeenCalledWith('error', expect.objectContaining({ code: 400 }));
+    });
+
+    it('should emit 403 when socket is not in the room', () => {
+      const socket = createMockSocket();
+      socket.data.user = fakeUser as never;
+      mockSessionService.isParticipant.mockReturnValue(false);
+      gateway.handleParticipantMediaState(
+        { meetingId: MEETING_UUID, video: true, audio: false },
+        socket,
+      );
+      expect(socket.emit).toHaveBeenCalledWith('error', {
+        code: 403,
+        message: 'You are not in this room',
+      });
+      expect(mockSessionService.updateMediaState).not.toHaveBeenCalled();
+    });
+
+    it('should update state and broadcast to room (not sender)', () => {
+      const socket = createMockSocket();
+      socket.data.user = fakeUser as never;
+      mockSessionService.isParticipant.mockReturnValue(true);
+      mockSessionService.updateMediaState.mockReturnValue({
+        meetingId: MEETING_UUID,
+        participant: { ...fakeParticipant, isVideoEnabled: true, isAudioEnabled: false },
+      });
+
+      gateway.handleParticipantMediaState(
+        { meetingId: MEETING_UUID, video: true, audio: false },
+        socket,
+      );
+
+      expect(mockSessionService.updateMediaState).toHaveBeenCalledWith('socket-1', true, false);
+      expect(socket.to).toHaveBeenCalledWith(MEETING_UUID);
+      expect(socket._broadcast.emit).toHaveBeenCalledWith('participant-media-state', {
+        meetingId: MEETING_UUID,
+        userId: 'user-1',
+        video: true,
+        audio: false,
+      });
+      // Sender should NOT receive an echo
+      expect(socket.emit).not.toHaveBeenCalled();
+    });
+
+    it('should emit 500 when updateMediaState returns undefined', () => {
+      const socket = createMockSocket();
+      socket.data.user = fakeUser as never;
+      mockSessionService.isParticipant.mockReturnValue(true);
+      mockSessionService.updateMediaState.mockReturnValue(undefined);
+
+      gateway.handleParticipantMediaState(
+        { meetingId: MEETING_UUID, video: false, audio: true },
+        socket,
+      );
+
+      expect(socket.emit).toHaveBeenCalledWith('error', {
+        code: 500,
+        message: 'Failed to update media state',
       });
     });
   });

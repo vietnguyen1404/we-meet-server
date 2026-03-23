@@ -1,7 +1,6 @@
 import { SignalingSessionService } from './signaling-session.service';
 
 const MEETING_UUID = '11111111-1111-4111-a111-111111111111';
-const MEETING_UUID_2 = '22222222-2222-4222-a222-222222222222';
 
 const fakeUser = {
   id: 'user-1',
@@ -166,6 +165,70 @@ describe('SignalingSessionService', () => {
     it('should return the meeting id after joining', () => {
       service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, false);
       expect(service.getMeetingIdBySocket('socket-1')).toBe(MEETING_UUID);
+    });
+  });
+
+  // ── addParticipant — media state defaults ────────────────────────────
+
+  describe('addParticipant — media state defaults', () => {
+    it('should initialize isVideoEnabled to false', () => {
+      const { participant } = service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, true);
+      expect(participant.isVideoEnabled).toBe(false);
+    });
+
+    it('should initialize isAudioEnabled to false', () => {
+      const { participant } = service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, true);
+      expect(participant.isAudioEnabled).toBe(false);
+    });
+  });
+
+  // ── updateMediaState ──────────────────────────────────────────────────
+
+  describe('updateMediaState', () => {
+    it('should return undefined for an unknown socketId', () => {
+      const result = service.updateMediaState('ghost-socket', true, true);
+      expect(result).toBeUndefined();
+    });
+
+    it('should return { meetingId, participant } and update video/audio flags', () => {
+      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, false);
+      const result = service.updateMediaState('socket-1', true, true);
+
+      expect(result).toBeDefined();
+      expect(result!.meetingId).toBe(MEETING_UUID);
+      expect(result!.participant.isVideoEnabled).toBe(true);
+      expect(result!.participant.isAudioEnabled).toBe(true);
+    });
+
+    it('should persist updated state in getParticipants', () => {
+      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, false);
+      service.updateMediaState('socket-1', true, false);
+
+      const [p] = service.getParticipants(MEETING_UUID);
+      expect(p.isVideoEnabled).toBe(true);
+      expect(p.isAudioEnabled).toBe(false);
+    });
+
+    it('should only update the targeted socket, not other participants', () => {
+      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, true);
+      service.addParticipant(MEETING_UUID, 'socket-2', fakeUser2, false);
+      service.updateMediaState('socket-1', true, true);
+
+      const participants = service.getParticipants(MEETING_UUID);
+      const p2 = participants.find((p) => p.socketId === 'socket-2')!;
+      expect(p2.isVideoEnabled).toBe(false);
+      expect(p2.isAudioEnabled).toBe(false);
+    });
+
+    it('should reflect last-write-wins on rapid toggles', () => {
+      service.addParticipant(MEETING_UUID, 'socket-1', fakeUser, false);
+      service.updateMediaState('socket-1', true, true);
+      service.updateMediaState('socket-1', false, false);
+      service.updateMediaState('socket-1', true, false);
+
+      const result = service.updateMediaState('socket-1', false, true);
+      expect(result!.participant.isVideoEnabled).toBe(false);
+      expect(result!.participant.isAudioEnabled).toBe(true);
     });
   });
 

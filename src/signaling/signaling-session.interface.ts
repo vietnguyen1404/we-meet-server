@@ -6,6 +6,8 @@ export interface ParticipantInfo {
   name: string;
   isHost: boolean;
   joinedAt: number;
+  isVideoEnabled: boolean;
+  isAudioEnabled: boolean;
 }
 
 export interface AddParticipantResult {
@@ -28,4 +30,9 @@ export interface ISignalingSessionService {
   getParticipants(meetingId: string): ParticipantInfo[];
   getMeetingIdBySocket(socketId: string): string | undefined;
   isParticipant(meetingId: string, socketId: string): boolean;
+  updateMediaState(
+    socketId: string,
+    video: boolean,
+    audio: boolean,
+  ): { meetingId: string; participant: ParticipantInfo } | undefined;
 }
