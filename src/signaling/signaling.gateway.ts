@@ -25,6 +25,7 @@ import { LeaveRoomDto } from './dto/leave-room.dto';
 import { OfferDto } from './dto/offer.dto';
 import { AnswerDto } from './dto/answer.dto';
 import { IceCandidateDto } from './dto/ice-candidate.dto';
+import { ParticipantMediaStateDto } from './dto/participant-media-state.dto';
 
 export type { ParticipantInfo };
 
@@ -38,6 +39,12 @@ interface ServerToClientEvents {
   'participant-joined': (data: { meetingId: string; participant: ParticipantInfo }) => void;
   'participant-left': (data: { meetingId: string; participant: ParticipantInfo }) => void;
   'participants-list': (data: { meetingId: string; participants: ParticipantInfo[] }) => void;
+  'participant-media-state': (data: {
+    meetingId: string;
+    userId: string;
+    video: boolean;
+    audio: boolean;
+  }) => void;
   offer: (data: SignalingRelayServerPayload) => void;
   answer: (data: SignalingRelayServerPayload) => void;
   'ice-candidate': (data: SignalingRelayServerPayload) => void;
@@ -47,6 +54,7 @@ interface ClientToServerEvents {
   'watch-meeting': (payload: WatchMeetingDto) => void;
   'join-room': (payload: JoinRoomDto) => void;
   'leave-room': (payload: LeaveRoomDto) => void;
+  'participant-media-state': (payload: ParticipantMediaStateDto) => void;
   offer: (payload: OfferDto) => void;
   answer: (payload: AnswerDto) => void;
   'ice-candidate': (payload: IceCandidateDto) => void;
@@ -225,6 +233,49 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     );
 
     this.removeFromRoomAndBroadcast(socket);
+  }
+
+  @SubscribeMessage('participant-media-state')
+  handleParticipantMediaState(
+    @MessageBody() raw: unknown,
+    @ConnectedSocket() socket: AuthenticatedSocket,
+  ): void {
+    const user = socket.data.user;
+    this.logger.debug(
+      `Received participant-media-state from socketId=${socket.id}: ${JSON.stringify(raw)}`,
+    );
+
+    if (!user) {
+      socket.emit('error', { code: 401, message: 'Not authenticated' });
+      return;
+    }
+
+    const dto = this.validateSocketPayload(ParticipantMediaStateDto, raw, socket);
+    if (!dto) return;
+
+    const { meetingId, video, audio } = dto;
+
+    if (!this.sessionService.isParticipant(meetingId, socket.id)) {
+      socket.emit('error', { code: 403, message: 'You are not in this room' });
+      return;
+    }
+
+    const result = this.sessionService.updateMediaState(socket.id, video, audio);
+    if (!result) {
+      socket.emit('error', { code: 500, message: 'Failed to update media state' });
+      return;
+    }
+
+    this.logger.log(
+      `event=participant-media-state meetingId=${meetingId} userId=${user.id} video=${String(video)} audio=${String(audio)} ts=${new Date().toISOString()}`,
+    );
+
+    socket.to(meetingId).emit('participant-media-state', {
+      meetingId,
+      userId: user.id,
+      video,
+      audio,
+    });
   }
 
   @SubscribeMessage('offer')

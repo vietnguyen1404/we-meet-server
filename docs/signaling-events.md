@@ -95,32 +95,38 @@ Authenticated clients can join meeting rooms, watch the lobby, and receive prese
 
 ### Client → Server Events
 
-| Event           | Payload                 | Description                                                                                                                                                                                   |
-| --------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `join-room`     | `{ meetingId: string }` | Join the **active call** (in-call state). Server validates meeting existence via `canJoinMeeting()`. Any authenticated user may join. This is the only event that makes a user a participant. |
-| `leave-room`    | `{ meetingId: string }` | Leave the active call. Server removes the socket from the participant store and broadcasts departure.                                                                                         |
-| `watch-meeting` | `{ meetingId: string }` | **Optional lobby observer.** Joins the `watch:{meetingId}` room to receive the current participant list and live join/leave updates, without entering the call.                               |
+| Event                     | Payload                                                 | Description                                                                                                                                                                                   |
+| ------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `join-room`               | `{ meetingId: string }`                                 | Join the **active call** (in-call state). Server validates meeting existence via `canJoinMeeting()`. Any authenticated user may join. This is the only event that makes a user a participant. |
+| `leave-room`              | `{ meetingId: string }`                                 | Leave the active call. Server removes the socket from the participant store and broadcasts departure.                                                                                         |
+| `watch-meeting`           | `{ meetingId: string }`                                 | **Optional lobby observer.** Joins the `watch:{meetingId}` room to receive the current participant list and live join/leave updates, without entering the call.                               |
+| `participant-media-state` | `{ meetingId: string, video: boolean, audio: boolean }` | Notify the server that the sender toggled camera and/or mic. Server updates its in-memory state and broadcasts to all **other** participants.                                                 |
 
 ### Server → Client Events
 
-| Event                | Payload                                                  | Description                                                                                                              |
-| -------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `participant-joined` | `{ meetingId: string, participant: ParticipantInfo }`    | Broadcast to all members of the call room and the `watch:{meetingId}` lobby when a new participant joins.                |
-| `participant-left`   | `{ meetingId: string, participant: ParticipantInfo }`    | Broadcast to all members of the call room and the `watch:{meetingId}` lobby when a participant leaves or disconnects.    |
-| `participants-list`  | `{ meetingId: string, participants: ParticipantInfo[] }` | Sent automatically to the joining socket after `join-room`, and immediately to the watcher socket after `watch-meeting`. |
-| `error`              | `{ code: number, message: string }`                      | Error response (e.g., 401, 403, 404).                                                                                    |
+| Event                     | Payload                                                                 | Description                                                                                                              |
+| ------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `participant-joined`      | `{ meetingId: string, participant: ParticipantInfo }`                   | Broadcast to all members of the call room and the `watch:{meetingId}` lobby when a new participant joins.                |
+| `participant-left`        | `{ meetingId: string, participant: ParticipantInfo }`                   | Broadcast to all members of the call room and the `watch:{meetingId}` lobby when a participant leaves or disconnects.    |
+| `participants-list`       | `{ meetingId: string, participants: ParticipantInfo[] }`                | Sent automatically to the joining socket after `join-room`, and immediately to the watcher socket after `watch-meeting`. |
+| `participant-media-state` | `{ meetingId: string, userId: string, video: boolean, audio: boolean }` | Broadcast to all **other** participants when one participant changes their camera or mic state. Sender is not echoed.    |
+| `error`                   | `{ code: number, message: string }`                                     | Error response (e.g., 401, 403, 404, 500).                                                                               |
 
 ### `ParticipantInfo`
 
 ```typescript
 interface ParticipantInfo {
+  socketId: string;
   userId: string;
   name: string;
-  socketId: string;
   isHost: boolean;
-  joinedAt: Date;
+  joinedAt: number; // Unix timestamp (Date.now())
+  isVideoEnabled: boolean; // camera on/off
+  isAudioEnabled: boolean; // mic on/off
 }
 ```
+
+Media state defaults to `false` when a participant joins. It is updated in real time via the `participant-media-state` event.
 
 ### Error Codes
 
@@ -128,7 +134,9 @@ interface ParticipantInfo {
 | ----- | -------------------------- |
 | `400` | Invalid or missing payload |
 | `401` | Not authenticated          |
+| `403` | Not in the room            |
 | `404` | Meeting not found          |
+| `500` | Internal state error       |
 
 ### Example: Joining a Room
 
@@ -136,23 +144,46 @@ interface ParticipantInfo {
 // After connecting with a valid JWT...
 socket.emit('join-room', { meetingId: 'meeting-uuid' });
 
-// The server automatically sends the current participant list to the joining socket.
+// The server automatically sends the current participant list (with media state) to the joining socket.
 socket.on('participants-list', ({ meetingId, participants }) => {
+  // Each participant includes isVideoEnabled and isAudioEnabled
   console.log(`Current participants in ${meetingId}:`, participants);
+  renderVideoGrid(participants);
 });
 
-// Listen for other participants joining
+// New participants arrive with their initial media state (both false)
 socket.on('participant-joined', ({ meetingId, participant }) => {
   console.log(`${participant.name} joined meeting ${meetingId}`);
+  addTile(participant); // tile renders even if camera is off
 });
 
 // Listen for participants leaving
 socket.on('participant-left', ({ meetingId, participant }) => {
   console.log(`${participant.name} left meeting ${meetingId}`);
+  removeTile(participant.userId);
+});
+
+// Receive real-time camera/mic toggles from other participants
+socket.on('participant-media-state', ({ meetingId, userId, video, audio }) => {
+  updateTileMediaState(userId, { video, audio });
 });
 
 // Leave a room explicitly
 socket.emit('leave-room', { meetingId: 'meeting-uuid' });
+```
+
+### Example: Toggling Camera / Mic
+
+```js
+// Called when the local user toggles their camera or mic
+function onLocalMediaToggle(isCameraOn, isMicOn) {
+  socket.emit('participant-media-state', {
+    meetingId: 'meeting-uuid',
+    video: isCameraOn,
+    audio: isMicOn,
+  });
+  // No need to handle an echo — the server does NOT emit back to the sender.
+}
 ```
 
 ### Example: Watching the Lobby
@@ -161,7 +192,7 @@ socket.emit('leave-room', { meetingId: 'meeting-uuid' });
 // Watch participant list without joining the call (e.g. pre-call lobby screen)
 socket.emit('watch-meeting', { meetingId: 'meeting-uuid' });
 
-// Server immediately sends the current participant list
+// Server immediately sends the current participant list (includes media state)
 socket.on('participants-list', ({ meetingId, participants }) => {
   console.log(`Lobby sees ${participants.length} participant(s)`);
 });

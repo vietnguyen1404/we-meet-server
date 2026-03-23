@@ -38,6 +38,8 @@ export class SignalingSessionService implements ISignalingSessionService {
       name: user.name ?? 'Anonymous',
       isHost,
       joinedAt: Date.now(),
+      isVideoEnabled: false,
+      isAudioEnabled: false,
     };
     room.set(socketId, participant);
     this.socketToMeeting.set(socketId, meetingId);
@@ -68,5 +70,20 @@ export class SignalingSessionService implements ISignalingSessionService {
 
   isParticipant(meetingId: string, socketId: string): boolean {
     return this.rooms.get(meetingId)?.has(socketId) ?? false;
+  }
+
+  updateMediaState(
+    socketId: string,
+    video: boolean,
+    audio: boolean,
+  ): { meetingId: string; participant: ParticipantInfo } | undefined {
+    const meetingId = this.socketToMeeting.get(socketId);
+    if (!meetingId) return undefined;
+    const room = this.rooms.get(meetingId);
+    const participant = room?.get(socketId);
+    if (!participant) return undefined;
+    participant.isVideoEnabled = video;
+    participant.isAudioEnabled = audio;
+    return { meetingId, participant };
   }
 }

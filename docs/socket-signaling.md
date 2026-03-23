@@ -79,9 +79,14 @@ interface ParticipantInfo {
   socketId: string;
   userId: string;
   name: string;
+  isHost: boolean;
   joinedAt: number; // Unix timestamp (Date.now())
+  isVideoEnabled: boolean; // camera on/off — always present, defaults to false
+  isAudioEnabled: boolean; // mic on/off — always present, defaults to false
 }
 ```
+
+Media state is managed by the server. It defaults to `false` on join and is updated in real time via `participant-media-state`.
 
 ---
 
@@ -143,6 +148,36 @@ Leave the video call explicitly.
 
 ---
 
+### `participant-media-state` (client → server)
+
+Notify the server that the local user toggled their camera or mic. The server updates its in-memory state and broadcasts the new state to all **other** participants (sender is never echoed back).
+
+**Payload:**
+
+```json
+{
+  "meetingId": "abc123",
+  "video": true,
+  "audio": false
+}
+```
+
+**Validation rules:**
+
+| Field       | Rule                               |
+| ----------- | ---------------------------------- |
+| `meetingId` | Required, non-empty, valid UUID v4 |
+| `video`     | Required, boolean                  |
+| `audio`     | Required, boolean                  |
+
+**Server behavior:**
+
+1. Validates the sender is an active participant in `meetingId` (403 if not).
+2. Updates `isVideoEnabled` and `isAudioEnabled` on the in-memory `ParticipantInfo`.
+3. Broadcasts `participant-media-state` to all **other** sockets in `{meetingId}` (sender excluded).
+
+---
+
 ### `offer`
 
 Relay a WebRTC offer to a specific peer.
@@ -197,7 +232,7 @@ Relay an ICE candidate to a specific peer.
 
 ### `participants-list`
 
-Sent to the socket that emitted `watch-meeting` or `join-room`.
+Sent to the socket that emitted `watch-meeting` or `join-room`. Includes the **full current media state** of every participant so the client can render the correct UI immediately (camera on/off tiles, mute indicators, etc.).
 
 **Payload:**
 
@@ -209,13 +244,19 @@ Sent to the socket that emitted `watch-meeting` or `join-room`.
       "socketId": "socket-abc",
       "userId": "user-uuid-1",
       "name": "Alice",
-      "joinedAt": 1741651200000
+      "isHost": true,
+      "joinedAt": 1741651200000,
+      "isVideoEnabled": true,
+      "isAudioEnabled": false
     },
     {
       "socketId": "socket-def",
       "userId": "user-uuid-2",
       "name": "Bob",
-      "joinedAt": 1741651205000
+      "isHost": false,
+      "joinedAt": 1741651205000,
+      "isVideoEnabled": false,
+      "isAudioEnabled": true
     }
   ]
 }
@@ -225,7 +266,7 @@ Sent to the socket that emitted `watch-meeting` or `join-room`.
 
 ### `participant-joined`
 
-Broadcast to all sockets in `{meetingId}` **and** `watch:{meetingId}` when a new participant joins the video call.
+Broadcast to all sockets in `{meetingId}` **and** `watch:{meetingId}` when a new participant joins the video call. New participants always join with `isVideoEnabled: false` and `isAudioEnabled: false`.
 
 **Payload:**
 
@@ -236,7 +277,10 @@ Broadcast to all sockets in `{meetingId}` **and** `watch:{meetingId}` when a new
     "socketId": "socket-abc",
     "userId": "user-uuid-1",
     "name": "Alice",
-    "joinedAt": 1741651200000
+    "isHost": false,
+    "joinedAt": 1741651200000,
+    "isVideoEnabled": false,
+    "isAudioEnabled": false
   }
 }
 ```
@@ -256,8 +300,28 @@ Broadcast to all sockets in `{meetingId}` **and** `watch:{meetingId}` when a par
     "socketId": "socket-abc",
     "userId": "user-uuid-1",
     "name": "Alice",
-    "joinedAt": 1741651200000
+    "isHost": false,
+    "joinedAt": 1741651200000,
+    "isVideoEnabled": true,
+    "isAudioEnabled": false
   }
+}
+```
+
+---
+
+### `participant-media-state` (server → client)
+
+Broadcast to all **other** participants in `{meetingId}` when one participant toggles their camera or mic. The sender does **not** receive this event.
+
+**Payload:**
+
+```json
+{
+  "meetingId": "abc123",
+  "userId": "user-uuid-1",
+  "video": true,
+  "audio": false
 }
 ```
 
@@ -294,6 +358,7 @@ Emitted to the socket that caused the error.
 | `401` | Not authenticated                             |
 | `403` | Not a member of the meeting / not in the room |
 | `404` | Meeting or target socket not found            |
+| `500` | Internal state error (e.g. media state write) |
 
 ---
 
@@ -329,12 +394,35 @@ socket.on('participant-left', ({ participant }) => {
 // Join from lobby (still watching) or fresh connection
 socket.emit('join-room', { meetingId: 'abc123' });
 
-// Receive the current list including yourself
+// Receive the current list — each participant includes isVideoEnabled / isAudioEnabled
 socket.on('participants-list', ({ participants }) => {
+  // Render a tile for every participant, even those with camera off
   initVideoGrid(participants);
 });
 
-// Others are notified via participant-joined
+// Others are notified; new joiners always start with video/audio = false
+socket.on('participant-joined', ({ participant }) => {
+  addTile(participant);
+});
+
+// Sync camera/mic state changes from other participants in real time
+socket.on('participant-media-state', ({ userId, video, audio }) => {
+  updateTileMediaState(userId, { video, audio });
+});
+```
+
+### Toggling camera / mic
+
+```js
+// After joining a room, send your media state whenever it changes.
+function onLocalMediaToggle(isCameraOn, isMicOn) {
+  socket.emit('participant-media-state', {
+    meetingId: 'abc123',
+    video: isCameraOn,
+    audio: isMicOn,
+  });
+  // Server does NOT echo back to the sender — update local UI directly.
+}
 ```
 
 ### WebRTC peer negotiation
