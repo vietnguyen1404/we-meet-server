@@ -19,7 +19,7 @@ jobs:
           script: |
             echo "Connected to server"
 
-            cd /home/ec2-user/we-meet-server
+            cd /home/ubuntu/we-meet-server
 
             git pull origin develop
 
