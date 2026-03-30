@@ -70,7 +70,7 @@ Browser                       Server                        Google
 
 ## 5. Security Notes
 
-- **CSRF protection**: `state: true` is set in `GoogleStrategy` — Passport generates and validates a CSRF state param on every round-trip.
+- **OAuth state / CSRF**: `state: true` has been **removed** from `GoogleStrategy` because passport-oauth2's built-in state verification requires server-side session storage (`express-session`), which this application does not configure. The callback URL is already protected by HTTPS and the short-lived authorization code; if you add session middleware in future you can re-enable `state: true` to get automatic CSRF state validation.
 - **HttpOnly cookie**: The refresh token is set via a `HttpOnly; Secure; SameSite=Strict` cookie, never in the response body.
 - **SSO-only accounts**: Users created via Google have no `passwordHash` and cannot authenticate via `POST /api/auth/login`.
 - **Race conditions**: Concurrent first-time logins for the same email are handled — P2002 unique constraint errors fall back to a lookup.

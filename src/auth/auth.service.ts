@@ -6,7 +6,6 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { Prisma } from '@prisma/client';
 import type { User } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { UsersRepository } from '../users/users.repository';
@@ -98,26 +97,12 @@ export class AuthService {
         }
         user = byEmail;
       } else {
-        try {
-          user = await this.usersRepository.create({
-            email: profile.email,
-            name: profile.name,
-            passwordHash: null,
-            provider: AUTH_PROVIDERS.GOOGLE,
-            providerId: profile.providerId,
-          });
-        } catch (err) {
-          if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-            // Race condition: another request created the user first
-            const created = await this.usersRepository.findByEmail(profile.email);
-            if (!created) {
-              throw new InternalServerErrorException('Failed to create user');
-            }
-            user = created;
-          } else {
-            throw err;
-          }
-        }
+        user = await this.usersRepository.createOAuthUser({
+          email: profile.email,
+          name: profile.name,
+          providerId: profile.providerId,
+          provider: AUTH_PROVIDERS.GOOGLE,
+        });
       }
     }
 

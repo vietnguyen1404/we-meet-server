@@ -18,16 +18,16 @@ The application currently supports only email/password authentication, which req
 
 | File                               | Change                                                  |
 | ---------------------------------- | ------------------------------------------------------- |
-|                                    | Make nullable; add and fields                           |
-|                                    | Add , ,                                                 |
-| /                                  | Add the three new Google env vars                       |
-|                                    | **New** — Passport                                      |
-|                                    | **New** — guard that initiates OAuth redirect           |
+| prisma/schema.prisma               | Make passwordHash nullable; add provider (AuthProvider enum) and providerId fields |
+| src/users/entities/user.entity.ts  | Add provider and providerId properties                  |
+| .env.example                       | Add the three new Google env vars                       |
+| src/auth/strategies/google.strategy.ts | **New** — Passport Google OAuth strategy           |
+| src/auth/guards/google-auth.guard.ts   | **New** — guard that initiates OAuth redirect       |
 | src/auth/auth.service.ts           | Extract issueTokens(user), add googleLogin(profile)     |
 | src/auth/auth.controller.ts        | Add GET /auth/google and GET /auth/google/callback      |
 | src/auth/auth.module.ts            | Register GoogleStrategy; import passport-google-oauth20 |
-| src/users/users.repository.ts      | Add findByProviderId(providerId)                        |
-| src/users/dto/user-response.dto.ts | Expose provider field                                   |
+| src/users/users.repository.ts      | Add findByProviderId(providerId) and createGoogleUser() |
+| src/users/dto/user-response.dto.ts | Expose provider field as AuthProvider type              |
 
 ### Services to Modify or Create
 

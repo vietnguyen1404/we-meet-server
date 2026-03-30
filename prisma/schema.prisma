@@ -15,19 +15,20 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
+  id           String       @id @default(uuid())
+  email        String       @unique
   passwordHash String?
   name         String?
-  role         UserRole @default(USER)
-  provider     String   @default("local")
-  providerId   String?  @unique
+  role         UserRole     @default(USER)
+  provider     AuthProvider @default(local)
+  providerId   String?
 
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
   refreshTokens RefreshToken[]
   hostedMeetings Meeting[]        @relation("MeetingHost")
 
+  @@unique([provider, providerId])
   @@map("users")
 }
 
@@ -46,6 +47,11 @@ model RefreshToken {
 enum UserRole {
   USER
   ADMIN
+}
+
+enum AuthProvider {
+  local
+  google
 }
 
 model Meeting {

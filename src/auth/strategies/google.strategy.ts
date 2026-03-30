@@ -4,13 +4,14 @@ import { ConfigService } from '@nestjs/config';
 import { Strategy } from 'passport-google-oauth20';
 import type { VerifyCallback } from 'passport-google-oauth20';
 import type { Profile } from 'passport-google-oauth20';
+import { AuthProvider } from '@prisma/client';
+
+export { AuthProvider };
 
 export const AUTH_PROVIDERS = {
-  LOCAL: 'local',
-  GOOGLE: 'google',
+  LOCAL: AuthProvider.local,
+  GOOGLE: AuthProvider.google,
 } as const;
-
-export type AuthProvider = (typeof AUTH_PROVIDERS)[keyof typeof AUTH_PROVIDERS];
 
 export interface GoogleProfile {
   email: string;
@@ -33,7 +34,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       );
     }
 
-    super({ clientID, clientSecret, callbackURL, scope: ['email', 'profile'], state: true });
+    super({ clientID, clientSecret, callbackURL, scope: ['email', 'profile'] });
   }
 
   validate(
