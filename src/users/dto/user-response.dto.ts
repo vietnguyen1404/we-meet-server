@@ -13,6 +13,9 @@ export class UserResponseDto {
   name!: string | null;
 
   @Expose()
+  avatar!: string | null;
+
+  @Expose()
   role!: UserRole;
 
   @Expose()

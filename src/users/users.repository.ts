@@ -41,6 +41,7 @@ export class UsersRepository {
   async createOAuthUser(data: {
     email: string;
     name: string | null;
+    avatar?: string | null;
     providerId: string;
     provider: AuthProvider;
   }): Promise<User> {
@@ -49,6 +50,7 @@ export class UsersRepository {
         data: {
           email: data.email,
           name: data.name,
+          avatar: data.avatar ?? null,
           passwordHash: null,
           provider: data.provider,
           providerId: data.providerId,

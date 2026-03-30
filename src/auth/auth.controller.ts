@@ -99,10 +99,10 @@ export class AuthController {
   @UseGuards(GoogleAuthGuard)
   async googleCallback(
     @Req() req: Request & { user: GoogleProfile },
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<AuthResponseDto> {
-    const { response, refreshToken } = await this.authService.googleLogin(req.user);
+    @Res() res: Response,
+  ): Promise<void> {
+    const { refreshToken } = await this.authService.googleLogin(req.user);
     res.cookie(this.REFRESH_TOKEN_COOKIE, refreshToken, this.COOKIE_OPTIONS);
-    return response;
+    res.redirect(`${process.env.CLIENT_ORIGIN}/auth/callback`);
   }
 }
