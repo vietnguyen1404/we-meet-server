@@ -51,6 +51,8 @@ const fakeUser = {
   name: 'Alice',
   passwordHash: 'hashed',
   role: 'USER' as const,
+  provider: 'local',
+  providerId: null,
   createdAt: new Date(),
   updatedAt: new Date(),
 };

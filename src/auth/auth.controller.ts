@@ -1,12 +1,14 @@
 import {
   Controller,
   Post,
+  Get,
   Body,
   HttpCode,
   HttpStatus,
   Res,
   Req,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -15,6 +17,8 @@ import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { UserResponseDto } from '../users/dto/user-response.dto';
+import { GoogleAuthGuard } from './guards/google-auth.guard';
+import type { GoogleProfile } from './strategies/google.strategy';
 
 @Controller('auth')
 export class AuthController {
@@ -83,5 +87,22 @@ export class AuthController {
     res.clearCookie(this.REFRESH_TOKEN_COOKIE, this.COOKIE_OPTIONS);
 
     return { message: 'Logged out successfully' };
+  }
+
+  @Get('google')
+  @UseGuards(GoogleAuthGuard)
+  googleAuth(): void {
+    // Passport redirects the request to Google — no body needed
+  }
+
+  @Get('google/callback')
+  @UseGuards(GoogleAuthGuard)
+  async googleCallback(
+    @Req() req: Request & { user: GoogleProfile },
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<AuthResponseDto> {
+    const { response, refreshToken } = await this.authService.googleLogin(req.user);
+    res.cookie(this.REFRESH_TOKEN_COOKIE, refreshToken, this.COOKIE_OPTIONS);
+    return response;
   }
 }

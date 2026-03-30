@@ -1,5 +1,5 @@
 import { Exclude, Expose } from 'class-transformer';
-import { UserRole } from '@prisma/client';
+import { UserRole, AuthProvider } from '@prisma/client';
 
 @Exclude()
 export class UserResponseDto {
@@ -14,6 +14,9 @@ export class UserResponseDto {
 
   @Expose()
   role!: UserRole;
+
+  @Expose()
+  provider!: AuthProvider;
 
   @Expose()
   createdAt!: Date;
