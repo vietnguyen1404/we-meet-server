@@ -24,7 +24,7 @@ jobs:
             git pull origin develop
 
             echo "Installing dependencies..."
-            npm ci --omit=dev
+            HUSKY=0 npm ci --omit=dev
 
             echo "Applying database migrations..."
             npm run db:migrate:deploy
@@ -39,4 +39,4 @@ jobs:
             pm2 reload nest-app --update-env 2>/dev/null || pm2 start dist/src/main.js --name nest-app
             pm2 save
 
-            echo "✓ Deploy success"
+            echo "Deploy success"
