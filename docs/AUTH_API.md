@@ -153,3 +153,30 @@ Authorization: Bearer <accessToken>
 ```
 
 See [JWT_AUTHENTICATION.md](./JWT_AUTHENTICATION.md) for implementation details and [REFRESH_TOKEN.md](./REFRESH_TOKEN.md) for the token rotation strategy.
+
+---
+
+## GET /api/auth/google
+
+Initiate Google OAuth 2.0 login. Redirects the browser to the Google consent screen.
+
+**Auth:** Not required
+
+**Request body:** none
+
+**Response:** `302 Redirect` to Google OAuth consent screen
+
+---
+
+## GET /api/auth/google/callback
+
+OAuth callback handler. Google redirects here after the user grants or denies consent.
+Issues an access token and sets a `refreshToken` cookie.
+
+**Auth:** Not required — handled by Passport internally via `state` CSRF token
+
+**Request body:** none
+
+**Response `200`:**
+
+See [GOOGLE_SSO.md](./GOOGLE_SSO.md) for environment setup and flow details.
