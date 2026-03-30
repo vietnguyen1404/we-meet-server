@@ -23,6 +23,9 @@ jobs:
 
             git pull origin develop
 
+            # Ensure Prisma schema is migrated before build/start
+            npm run db:migrate --if-present
+
             npm install
 
             npm run build
