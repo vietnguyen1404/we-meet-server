@@ -3,8 +3,11 @@ import {
   ConflictException,
   UnauthorizedException,
   InternalServerErrorException,
+  BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { Prisma } from '@prisma/client';
+import type { User } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { UsersRepository } from '../users/users.repository';
 import { RefreshTokenService } from './refresh-token.service';
@@ -15,6 +18,8 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
 import { plainToInstance } from 'class-transformer';
+import type { GoogleProfile } from './strategies/google.strategy';
+import { AUTH_PROVIDERS } from './strategies/google.strategy';
 
 @Injectable()
 export class AuthService {
@@ -58,22 +63,65 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    if (!user.passwordHash) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Generate JWT access token
-    const payload: JwtPayload = {
-      userId: user.id,
-      email: user.email,
-      role: user.role,
+    const { accessToken, refreshToken } = await this.generateAuthTokens(user);
+
+    return {
+      response: {
+        user: plainToInstance(UserResponseDto, user),
+        accessToken,
+      },
+      refreshToken,
     };
+  }
 
-    const accessToken = this.jwtService.sign(payload);
+  async googleLogin(
+    profile: GoogleProfile,
+  ): Promise<{ response: AuthResponseDto; refreshToken: string }> {
+    let user = await this.usersRepository.findByProviderId(profile.providerId);
 
-    // Generate refresh token
-    const refreshToken = await this.refreshTokenService.createRefreshToken(user.id);
+    if (!user) {
+      const byEmail = await this.usersRepository.findByEmail(profile.email);
+      if (byEmail) {
+        if (byEmail.provider === AUTH_PROVIDERS.LOCAL) {
+          throw new ConflictException(
+            'An account with this email already exists. Please log in with your password.',
+          );
+        }
+        user = byEmail;
+      } else {
+        try {
+          user = await this.usersRepository.create({
+            email: profile.email,
+            name: profile.name,
+            passwordHash: null,
+            provider: AUTH_PROVIDERS.GOOGLE,
+            providerId: profile.providerId,
+          });
+        } catch (err) {
+          if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+            // Race condition: another request created the user first
+            const created = await this.usersRepository.findByEmail(profile.email);
+            if (!created) {
+              throw new InternalServerErrorException('Failed to create user');
+            }
+            user = created;
+          } else {
+            throw err;
+          }
+        }
+      }
+    }
+
+    const { accessToken, refreshToken } = await this.generateAuthTokens(user);
 
     return {
       response: {
@@ -95,13 +143,7 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
 
-    // Generate new access token
-    const payload: JwtPayload = {
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-    };
-    const accessToken = this.jwtService.sign(payload);
+    const accessToken = this.jwtService.sign(this.buildPayload(user));
 
     // Rotate refresh token
     const newRefreshToken = await this.refreshTokenService.rotateRefreshToken(tokenHash, userId);
@@ -123,5 +165,28 @@ export class AuthService {
     }
 
     return plainToInstance(UserResponseDto, user);
+  }
+
+  private buildPayload(user: User): JwtPayload {
+    return { userId: user.id, email: user.email, role: user.role };
+  }
+
+  private async generateAuthTokens(
+    user: User,
+  ): Promise<{ accessToken: string; refreshToken: string }> {
+    if (!user?.id) {
+      throw new BadRequestException('Invalid user object provided');
+    }
+
+    try {
+      const [accessToken, refreshToken] = await Promise.all([
+        Promise.resolve(this.jwtService.sign(this.buildPayload(user))),
+        this.refreshTokenService.createRefreshToken(user.id),
+      ]);
+
+      return { accessToken, refreshToken };
+    } catch {
+      throw new InternalServerErrorException('Failed to issue authentication tokens');
+    }
   }
 }

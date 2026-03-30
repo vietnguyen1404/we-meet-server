@@ -16,6 +16,9 @@ export class UserResponseDto {
   role!: UserRole;
 
   @Expose()
+  provider!: string;
+
+  @Expose()
   createdAt!: Date;
 
   @Expose()

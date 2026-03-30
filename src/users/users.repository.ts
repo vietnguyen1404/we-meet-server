@@ -28,6 +28,12 @@ export class UsersRepository {
     });
   }
 
+  async findByProviderId(providerId: string): Promise<User | null> {
+    return this.prisma.user.findUnique({
+      where: { providerId },
+    });
+  }
+
   async update(id: string, data: Prisma.UserUpdateInput): Promise<User> {
     return this.prisma.user.update({
       where: { id },
