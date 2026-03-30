@@ -19,6 +19,7 @@ function makeUser(overrides: Partial<User> = {}): User {
     email: 'alice@gmail.com',
     passwordHash: null,
     name: 'Alice Google',
+    avatar: 'https://photo.example.com/alice.jpg',
     role: 'USER',
     provider: 'google',
     providerId: 'google-sub-123',
@@ -31,7 +32,7 @@ function makeUser(overrides: Partial<User> = {}): User {
 describe('AuthService.googleLogin()', () => {
   let service: AuthService;
   let usersRepository: jest.Mocked<
-    Pick<UsersRepository, 'findByProviderId' | 'findByEmail' | 'createOAuthUser'>
+    Pick<UsersRepository, 'findByProviderId' | 'findByEmail' | 'createOAuthUser' | 'update'>
   >;
   let jwtService: jest.Mocked<Pick<JwtService, 'sign'>>;
   let refreshTokenService: jest.Mocked<Pick<RefreshTokenService, 'createRefreshToken'>>;
@@ -41,6 +42,7 @@ describe('AuthService.googleLogin()', () => {
       findByProviderId: jest.fn(),
       findByEmail: jest.fn(),
       createOAuthUser: jest.fn(),
+      update: jest.fn(),
     };
 
     jwtService = { sign: jest.fn().mockReturnValue('access-token') };
@@ -79,6 +81,7 @@ describe('AuthService.googleLogin()', () => {
     expect(usersRepository.createOAuthUser).toHaveBeenCalledWith({
       email: 'alice@gmail.com',
       name: 'Alice Google',
+      avatar: 'https://photo.example.com/alice.jpg',
       providerId: 'google-sub-123',
       provider: 'google',
     });
@@ -91,6 +94,28 @@ describe('AuthService.googleLogin()', () => {
     usersRepository.findByEmail.mockResolvedValue(localUser);
 
     await expect(service.googleLogin(GOOGLE_PROFILE)).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('backfills avatar for returning Google user when avatar is null', async () => {
+    const userWithoutAvatar = makeUser({ avatar: null });
+    const userWithAvatar = makeUser();
+    usersRepository.findByProviderId.mockResolvedValue(userWithoutAvatar);
+    usersRepository.update.mockResolvedValue(userWithAvatar);
+
+    await service.googleLogin(GOOGLE_PROFILE);
+
+    expect(usersRepository.update).toHaveBeenCalledWith('user-id-1', {
+      avatar: 'https://photo.example.com/alice.jpg',
+    });
+  });
+
+  it('does not overwrite existing avatar for returning Google user', async () => {
+    const userWithAvatar = makeUser({ avatar: 'https://existing.example.com/photo.jpg' });
+    usersRepository.findByProviderId.mockResolvedValue(userWithAvatar);
+
+    await service.googleLogin(GOOGLE_PROFILE);
+
+    expect(usersRepository.update).not.toHaveBeenCalled();
   });
 
   it('propagates errors thrown by createOAuthUser', async () => {

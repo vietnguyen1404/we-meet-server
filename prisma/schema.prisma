@@ -19,6 +19,7 @@ model User {
   email        String       @unique
   passwordHash String?
   name         String?
+  avatar       String?
   role         UserRole     @default(USER)
   provider     AuthProvider @default(local)
   providerId   String?

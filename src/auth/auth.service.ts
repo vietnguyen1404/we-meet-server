@@ -87,7 +87,12 @@ export class AuthService {
   ): Promise<{ response: AuthResponseDto; refreshToken: string }> {
     let user = await this.usersRepository.findByProviderId(profile.providerId);
 
-    if (!user) {
+    if (user) {
+      // Returning Google user — backfill avatar if not yet set
+      if (!user.avatar && profile.picture) {
+        user = await this.usersRepository.update(user.id, { avatar: profile.picture });
+      }
+    } else {
       const byEmail = await this.usersRepository.findByEmail(profile.email);
       if (byEmail) {
         if (byEmail.provider === AUTH_PROVIDERS.LOCAL) {
@@ -95,11 +100,17 @@ export class AuthService {
             'An account with this email already exists. Please log in with your password.',
           );
         }
-        user = byEmail;
+        // Existing Google user found by email — backfill avatar if not yet set
+        if (!byEmail.avatar && profile.picture) {
+          user = await this.usersRepository.update(byEmail.id, { avatar: profile.picture });
+        } else {
+          user = byEmail;
+        }
       } else {
         user = await this.usersRepository.createOAuthUser({
           email: profile.email,
           name: profile.name,
+          avatar: profile.picture,
           providerId: profile.providerId,
           provider: AUTH_PROVIDERS.GOOGLE,
         });
