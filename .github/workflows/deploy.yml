@@ -18,13 +18,23 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script_stop: true
           script: |
-
             echo "Pulling latest code..."
             cd /home/ubuntu/we-meet-server
             git pull origin develop
 
+
+            echo "Node version:"
+            node -v
+
+            echo "=== DEBUG NODE ==="
+            echo "whoami: $(whoami)"
+            echo "node version: $(node -v)"
+            echo "node path: $(which node)"
+            echo "=================="
+
             echo "Installing dependencies..."
-            HUSKY=0 npm ci --omit=dev
+            export NODE_ENV=production
+            HUSKY=0 npm ci --omit=dev --ignore-scripts
 
             echo "Applying database migrations..."
             npm run db:migrate:deploy
