@@ -22,15 +22,10 @@ jobs:
             cd /home/ubuntu/we-meet-server
             git pull origin develop
 
-
-            echo "Node version:"
-            node -v
-
-            echo "=== DEBUG NODE ==="
-            echo "whoami: $(whoami)"
-            echo "node version: $(node -v)"
-            echo "node path: $(which node)"
-            echo "=================="
+            echo "Setup Node..."
+            export NVM_DIR="$HOME/.nvm"
+            source $NVM_DIR/nvm.sh
+            nvm use 22.19
 
             echo "Installing dependencies..."
             export NODE_ENV=production
