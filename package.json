@@ -26,7 +26,8 @@
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
-    "db:migrate:status": "prisma migrate status --schema prisma/schema.prisma"
+    "db:migrate:status": "prisma migrate status --schema prisma/schema.prisma",
+    "db:migrate:resolve:m0": "prisma migrate resolve --applied 20260330000000_add_sso_provider_fields"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
