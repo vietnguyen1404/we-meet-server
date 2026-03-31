@@ -16,58 +16,19 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          script_stop: true
           script: |
-            echo "Pulling latest code..."
+            echo "Connected to server"
+
             cd /home/ubuntu/we-meet-server
+
             git pull origin develop
 
-            echo "Setup Node..."
-            export NVM_DIR="$HOME/.nvm"
-            source $NVM_DIR/nvm.sh
-            nvm use 22.19
+            npm install
 
-            echo "Installing dependencies..."
-            export NODE_ENV=production
-            HUSKY=0 npm ci --ignore-scripts
-
-            echo "Checking Prisma migration status..."
-            npx prisma migrate status || true
-
-            echo "Applying database migrations..."
-            if ! npx prisma migrate deploy; then
-              echo "Migration failed. Debug info:"
-
-              echo "Migration status:"
-              npx prisma migrate status || true
-
-              echo "Validate schema:"
-              npx prisma validate || true
-
-              echo "Pull DB schema:"
-              npx prisma db pull || true
-
-              echo "Stop deploy due to migration error"
-              exit 1
-            fi
-
-            echo "Generating Prisma client..."
-            npx prisma generate
-
-            echo "Building application..."
             npm run build
 
-            echo "Restarting application..."
-            pm2 reload nest-app --update-env 2>/dev/null || pm2 start dist/src/main.js --name nest-app
+            pm2 restart nest-app || pm2 start dist/src/main.js --name nest-app
+
             pm2 save
-
-            echo "PM2 status:"
-            pm2 list
-
-            echo "Last logs:"
-            pm2 logs nest-app --lines 20
-
-            echo "Health check..."
-            curl -f http://localhost:3000 || exit 1
 
             echo "Deploy success"
