@@ -3,10 +3,11 @@ import { ValidationPipe, Logger } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { NestExpressApplication } from '@nestjs/platform-express';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Cookie parser middleware
   app.use(cookieParser());
@@ -22,6 +23,8 @@ async function bootstrap() {
       },
     }),
   );
+
+  app.set('trust proxy', 1);
 
   // Global exception filter
   app.useGlobalFilters(new GlobalExceptionFilter());

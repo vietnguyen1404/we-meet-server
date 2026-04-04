@@ -26,7 +26,7 @@ export class AuthController {
   private readonly COOKIE_OPTIONS = {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict' as const,
+    sameSite: 'none' as const,
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   };
 
@@ -57,6 +57,10 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<RefreshTokenDto> {
+    console.log('req.secure:', req.secure);
+    console.log('protocol:', req.protocol);
+    console.log('x-forwarded-proto:', req.headers['x-forwarded-proto']);
+
     const refreshToken = req.cookies[this.REFRESH_TOKEN_COOKIE] as string | undefined;
 
     if (!refreshToken) {
