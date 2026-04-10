@@ -13,11 +13,16 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { CreateMeetingDto } from './dto/create-meeting.dto';
 import { MeetingResponseDto } from './dto/meeting-response.dto';
+import { IceConfigService } from '../ice-config/ice-config.service';
+import { IceServersResponseDto } from '../ice-config/dto/ice-servers-response.dto';
 
 @Controller('meetings')
 @UseGuards(JwtAuthGuard)
 export class MeetingsController {
-  constructor(private readonly meetingsService: MeetingsService) {}
+  constructor(
+    private readonly meetingsService: MeetingsService,
+    private readonly iceConfigService: IceConfigService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -26,6 +31,12 @@ export class MeetingsController {
     @Body() createMeetingDto: CreateMeetingDto,
   ): Promise<MeetingResponseDto> {
     return this.meetingsService.createMeeting(userId, createMeetingDto);
+  }
+
+  @Get('ice-servers')
+  @HttpCode(HttpStatus.OK)
+  getIceServers(@CurrentUser('id') userId: string): IceServersResponseDto {
+    return { iceServers: this.iceConfigService.getIceServers(userId) };
   }
 
   @Get(':id')

@@ -9,6 +9,7 @@ import { UsersRepository } from '../users/users.repository';
 import { MeetingsRepository } from '../meetings/meetings.repository';
 import { SIGNALING_SESSION_SERVICE } from './signaling-session.interface';
 import type { ParticipantInfo } from './signaling-session.interface';
+import { IceConfigService } from '../ice-config/ice-config.service';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -49,9 +50,10 @@ const fakeUser = {
   id: 'user-1',
   email: 'alice@test.com',
   name: 'Alice',
+  avatar: null,
   passwordHash: 'hashed',
   role: 'USER' as const,
-  provider: 'local',
+  provider: 'local' as const,
   providerId: null,
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -80,6 +82,7 @@ describe('SignalingGateway', () => {
     updateMediaState: jest.Mock;
   };
   let mockRateLimiter: { check: jest.Mock; clearSocket: jest.Mock };
+  let mockIceConfigService: { getIceServers: jest.Mock };
   let mockServerToChain: { to: jest.Mock; emit: jest.Mock };
 
   beforeEach(async () => {
@@ -100,6 +103,9 @@ describe('SignalingGateway', () => {
       check: jest.fn().mockReturnValue(true),
       clearSocket: jest.fn(),
     };
+    mockIceConfigService = {
+      getIceServers: jest.fn().mockReturnValue([{ urls: 'stun:stun.l.google.com:19302' }]),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -109,6 +115,7 @@ describe('SignalingGateway', () => {
         { provide: MeetingsRepository, useValue: meetingsRepository },
         { provide: SIGNALING_SESSION_SERVICE, useValue: mockSessionService },
         { provide: SignalingRateLimiterService, useValue: mockRateLimiter },
+        { provide: IceConfigService, useValue: mockIceConfigService },
       ],
     }).compile();
 

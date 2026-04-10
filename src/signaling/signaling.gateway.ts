@@ -26,6 +26,8 @@ import { OfferDto } from './dto/offer.dto';
 import { AnswerDto } from './dto/answer.dto';
 import { IceCandidateDto } from './dto/ice-candidate.dto';
 import { ParticipantMediaStateDto } from './dto/participant-media-state.dto';
+import { IceConfigService } from '../ice-config/ice-config.service';
+import type { IceServerDto } from '../ice-config/dto/ice-servers-response.dto';
 
 export type { ParticipantInfo };
 
@@ -45,6 +47,7 @@ interface ServerToClientEvents {
     video: boolean;
     audio: boolean;
   }) => void;
+  'ice-servers': (data: { iceServers: IceServerDto[] }) => void;
   offer: (data: SignalingRelayServerPayload) => void;
   answer: (data: SignalingRelayServerPayload) => void;
   'ice-candidate': (data: SignalingRelayServerPayload) => void;
@@ -90,6 +93,7 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     @Inject(SIGNALING_SESSION_SERVICE)
     private readonly sessionService: ISignalingSessionService,
     private readonly rateLimiter: SignalingRateLimiterService,
+    private readonly iceConfigService: IceConfigService,
   ) {}
 
   async handleConnection(socket: AuthenticatedSocket): Promise<void> {
@@ -209,6 +213,10 @@ export class SignalingGateway implements OnGatewayConnection, OnGatewayDisconnec
     socket.emit('participants-list', {
       meetingId,
       participants: this.sessionService.getParticipants(meetingId),
+    });
+
+    socket.emit('ice-servers', {
+      iceServers: this.iceConfigService.getIceServers(user.id),
     });
   }
 

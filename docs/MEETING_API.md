@@ -8,13 +8,13 @@ All routes are prefixed with `/api`. All endpoints require a valid JWT Bearer to
 
 The meeting experience follows a **pre-join / in-call** separation:
 
-| Phase                    | Client Action                                                             | Server Involvement                                                           |
-| ------------------------ | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| **1. Open meeting page** | `GET /meetings/:id`                                                       | Returns meeting metadata (title, hostId). User is **not** yet a participant. |
-| **2. Pre-join lobby**    | Render camera/mic preview. Optionally emit `watch-meeting` via WebSocket. | Sends current `participants-list` to the watcher. No in-call state created.  |
-| **3. Join call**         | Emit `join-room` via WebSocket.                                           | Adds user to in-memory participant store. Broadcasts `participant-joined`.   |
-| **4. In-call**           | WebRTC signaling (`offer`, `answer`, `ice-candidate`).                    | Relays signaling between peers.                                              |
-| **5. Leave**             | Emit `leave-room` or close the tab.                                       | Removes participant, broadcasts `participant-left`.                          |
+| Phase                    | Client Action                                                                                                      | Server Involvement                                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| **1. Open meeting page** | `GET /meetings/:id`                                                                                                | Returns meeting metadata (title, hostId). User is **not** yet a participant.                               |
+| **2. Pre-join lobby**    | Render camera/mic preview. Optionally emit `watch-meeting` via WebSocket.                                          | Sends current `participants-list` to the watcher. No in-call state created.                                |
+| **3. Join call**         | Emit `join-room` via WebSocket.                                                                                    | Adds user to in-memory participant store. Broadcasts `participant-joined`. Pushes `ice-servers` to socket. |
+| **4. In-call**           | Initialize `RTCPeerConnection` with received ICE servers. Exchange signaling (`offer`, `answer`, `ice-candidate`). | Relays signaling between peers.                                                                            |
+| **5. Leave**             | Emit `leave-room` or close the tab.                                                                                | Removes participant, broadcasts `participant-left`.                                                        |
 
 > **Presence is ephemeral.** It exists only after `join-room` and is cleared on `leave-room` or disconnect. The REST API never returns live participant data — use the `watch-meeting` WebSocket event for real-time presence.
 
@@ -31,6 +31,12 @@ meetings/
 ├── meetings.service.ts           # Business logic
 ├── meetings.repository.ts        # Data access layer
 └── meetings.module.ts            # Module registration
+
+ice-config/                       # Standalone ICE/TURN configuration module
+├── dto/
+│   └── ice-servers-response.dto.ts  # IceServerDto, IceServersResponseDto
+├── ice-config.service.ts         # STUN/TURN credential generation
+└── ice-config.module.ts          # Module registration (exported to meetings + signaling)
 ```
 
 ## Database Schema
@@ -95,7 +101,55 @@ curl -X POST http://localhost:3000/api/meetings \
 
 ---
 
-### 2. Get Meeting Details
+### 2. Get ICE Server Configuration
+
+**GET /api/meetings/ice-servers**
+
+Returns the ICE server list (STUN + TURN) that the client should pass to `RTCPeerConnection`. Credentials are generated per-request: in dynamic mode a short-lived HMAC-SHA1 token is issued; in static mode the configured credentials are returned. The response never exposes long-lived TURN secrets.
+
+**Authentication Required:** Yes (JWT Bearer token)
+
+**Response (200 OK):**
+
+```json
+{
+  "iceServers": [
+    {
+      "urls": "stun:stun.l.google.com:19302"
+    },
+    {
+      "urls": "turn:turn.example.com:3478",
+      "username": "1712345678:user-uuid",
+      "credential": "<base64-hmac-sha1>"
+    },
+    {
+      "urls": "turns:turn.example.com:5349",
+      "username": "1712345678:user-uuid",
+      "credential": "<base64-hmac-sha1>"
+    }
+  ]
+}
+```
+
+> When no TURN server is configured, the response contains only the STUN entry. Clients fall back to STUN-only or direct P2P.
+
+**Dynamic credential format:**
+
+- `username` — `"<expiry_unix_ts>:<userId>"` where expiry = now + TTL (default 3600 s)
+- `credential` — `base64(HMAC-SHA1(TURN_SECRET, username))`, compatible with coturn REST API auth
+
+**Example (cURL):**
+
+```bash
+curl -X GET http://localhost:3000/api/meetings/ice-servers \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+> **Tip:** Clients do not need to call this endpoint separately. The same ICE config is automatically pushed via the WebSocket `ice-servers` event immediately after a successful `join-room` — see [signaling-events.md](./signaling-events.md).
+
+---
+
+### 3. Get Meeting Details
 
 **GET /api/meetings/:id**
 
@@ -194,7 +248,7 @@ If omitted, defaults to "Untitled Meeting".
 | Status Code               | Scenario                                  |
 | ------------------------- | ----------------------------------------- |
 | 201 Created               | Meeting created successfully              |
-| 200 OK                    | Details retrieved                         |
+| 200 OK                    | Details or ICE config retrieved           |
 | 400 Bad Request           | Invalid input (e.g., non-UUID meeting ID) |
 | 401 Unauthorized          | Missing or invalid access token           |
 | 404 Not Found             | Meeting doesn't exist                     |
