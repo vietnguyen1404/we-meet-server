@@ -7,6 +7,7 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { MeetingsModule } from './meetings/meetings.module';
 import { SignalingModule } from './signaling/signaling.module';
+import { IceConfigModule } from './ice-config/ice-config.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { SignalingModule } from './signaling/signaling.module';
     AuthModule,
     MeetingsModule,
     SignalingModule,
+    IceConfigModule,
   ],
 })
 export class AppModule {}

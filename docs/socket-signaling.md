@@ -127,6 +127,7 @@ Join the active video call as a participant.
 3. Joins the socket to the `{meetingId}` room.
 4. Emits `participant-joined` to both `{meetingId}` and `watch:{meetingId}` rooms (excluding the joining socket).
 5. Emits `participants-list` to the joining socket.
+6. Emits `ice-servers` to the joining socket with STUN/TURN configuration.
 
 ---
 
@@ -264,6 +265,38 @@ Sent to the socket that emitted `watch-meeting` or `join-room`. Includes the **f
 
 ---
 
+### `ice-servers`
+
+Sent **only to the joining socket** immediately after `participants-list` when a `join-room` succeeds. Contains the STUN/TURN ICE server configuration the client should use for this session.
+
+**Payload:**
+
+```json
+{
+  "iceServers": [
+    {
+      "urls": "stun:stun.l.google.com:19302"
+    },
+    {
+      "urls": "turn:turn.example.com:3478",
+      "username": "1712345678:user-uuid",
+      "credential": "<base64-hmac-sha1>"
+    }
+  ]
+}
+```
+
+**Notes:**
+
+- Each `iceServers` entry matches the W3C `RTCIceServer` dictionary and can be passed directly to `new RTCPeerConnection({ iceServers })`.
+- STUN entries contain only `urls`. TURN entries include `username` and `credential`.
+- In **dynamic mode** (recommended): `username` is `"<expiry_unix_ts>:<userId>"` and `credential` is a short-lived HMAC-SHA1 token. Credentials expire after the configured TTL (default 1 hour).
+- In **static mode** (fallback): `username` and `credential` are the static values from env vars.
+- If TURN is not configured, only the STUN entry is included. Clients fall back to STUN-only or direct P2P.
+- Alternatively, clients can call `GET /api/meetings/ice-servers` before connecting to fetch the same config over HTTP.
+
+---
+
 ### `participant-joined`
 
 Broadcast to all sockets in `{meetingId}` **and** `watch:{meetingId}` when a new participant joins the video call. New participants always join with `isVideoEnabled: false` and `isAudioEnabled: false`.
@@ -398,6 +431,13 @@ socket.emit('join-room', { meetingId: 'abc123' });
 socket.on('participants-list', ({ participants }) => {
   // Render a tile for every participant, even those with camera off
   initVideoGrid(participants);
+});
+
+// Receive STUN/TURN config — emitted right after participants-list on join-room
+socket.on('ice-servers', ({ iceServers }) => {
+  // Pass directly to RTCPeerConnection when creating peer connections
+  const pc = new RTCPeerConnection({ iceServers });
+  // ... begin negotiation
 });
 
 // Others are notified; new joiners always start with video/audio = false

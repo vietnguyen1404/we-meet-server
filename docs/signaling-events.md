@@ -104,13 +104,14 @@ Authenticated clients can join meeting rooms, watch the lobby, and receive prese
 
 ### Server → Client Events
 
-| Event                     | Payload                                                                 | Description                                                                                                              |
-| ------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `participant-joined`      | `{ meetingId: string, participant: ParticipantInfo }`                   | Broadcast to all members of the call room and the `watch:{meetingId}` lobby when a new participant joins.                |
-| `participant-left`        | `{ meetingId: string, participant: ParticipantInfo }`                   | Broadcast to all members of the call room and the `watch:{meetingId}` lobby when a participant leaves or disconnects.    |
-| `participants-list`       | `{ meetingId: string, participants: ParticipantInfo[] }`                | Sent automatically to the joining socket after `join-room`, and immediately to the watcher socket after `watch-meeting`. |
-| `participant-media-state` | `{ meetingId: string, userId: string, video: boolean, audio: boolean }` | Broadcast to all **other** participants when one participant changes their camera or mic state. Sender is not echoed.    |
-| `error`                   | `{ code: number, message: string }`                                     | Error response (e.g., 401, 403, 404, 500).                                                                               |
+| Event                     | Payload                                                                 | Description                                                                                                                                   |
+| ------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `participant-joined`      | `{ meetingId: string, participant: ParticipantInfo }`                   | Broadcast to all members of the call room and the `watch:{meetingId}` lobby when a new participant joins.                                     |
+| `participant-left`        | `{ meetingId: string, participant: ParticipantInfo }`                   | Broadcast to all members of the call room and the `watch:{meetingId}` lobby when a participant leaves or disconnects.                         |
+| `participants-list`       | `{ meetingId: string, participants: ParticipantInfo[] }`                | Sent automatically to the joining socket after `join-room`, and immediately to the watcher socket after `watch-meeting`.                      |
+| `ice-servers`             | `{ iceServers: IceServerConfig[] }`                                     | Sent exclusively to the joining socket immediately after `participants-list`. Contains STUN/TURN config ready to pass to `RTCPeerConnection`. |
+| `participant-media-state` | `{ meetingId: string, userId: string, video: boolean, audio: boolean }` | Broadcast to all **other** participants when one participant changes their camera or mic state. Sender is not echoed.                         |
+| `error`                   | `{ code: number, message: string }`                                     | Error response (e.g., 401, 403, 404, 500).                                                                                                    |
 
 ### `ParticipantInfo`
 
@@ -127,6 +128,18 @@ interface ParticipantInfo {
 ```
 
 Media state defaults to `false` when a participant joins. It is updated in real time via the `participant-media-state` event.
+
+### `IceServerConfig`
+
+```typescript
+interface IceServerConfig {
+  urls: string | string[];
+  username?: string; // present for TURN entries
+  credential?: string; // present for TURN entries
+}
+```
+
+Matches the W3C `RTCIceServer` dictionary and can be passed directly to `new RTCPeerConnection({ iceServers })`. STUN entries have only `urls`; TURN entries include short-lived credentials.
 
 ### Error Codes
 
@@ -149,6 +162,15 @@ socket.on('participants-list', ({ meetingId, participants }) => {
   // Each participant includes isVideoEnabled and isAudioEnabled
   console.log(`Current participants in ${meetingId}:`, participants);
   renderVideoGrid(participants);
+});
+
+// Immediately after participants-list, the server sends ICE server config.
+// Use this to initialise RTCPeerConnection before starting WebRTC negotiation.
+socket.on('ice-servers', ({ iceServers }) => {
+  // iceServers is ready to pass directly to RTCPeerConnection
+  window.__iceServers = iceServers;
+  console.log('ICE servers received:', iceServers);
+  // Example: new RTCPeerConnection({ iceServers })
 });
 
 // New participants arrive with their initial media state (both false)
